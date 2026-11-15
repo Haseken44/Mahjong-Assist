@@ -312,3 +312,13 @@ def test_special_situation_yaku():
     assert not both.ok and "同時" in both.error
     first = score_hand(hand, RoundSettings(seat_wind="east", is_first_draw=True), tsumo=True)
     assert any(y["name"] == "天和" for y in first.yaku)
+
+
+def test_score_both_shows_other_seat_tsumo():
+    from app.logic.scorer import score_both
+
+    hand = "2m 3m 4m 0p 6p 7p 3s 4s 5s 6s 7s 8s 5p 5p".split()
+    d = score_both(hand, RoundSettings(seat_wind="east"))
+    other = d["tsumo_other"]
+    assert d["dealer"] and not other["dealer"]
+    assert [p["who"] for p in other["pays"]] == ["親", "子 2人がそれぞれ"]

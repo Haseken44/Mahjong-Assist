@@ -296,8 +296,13 @@ def score_hand(hand: list[str], settings: RoundSettings, win_tile: str | None = 
 
 def score_both(hand: list[str], settings: RoundSettings, win_tile: str | None = None) -> dict:
     """同じアガリ形を「ロンした場合」「ツモした場合」の両方で計算する。"""
+    # 親・子を入れ替えた場合のツモの支払い（参考。自風の設定を間違えやすいので両方見せる）
+    other_seat = "south" if settings.is_dealer else "east"
+    other = score_hand(hand, settings.model_copy(update={"seat_wind": other_seat}), win_tile, tsumo=True)
     return {
         "ron": score_hand(hand, settings, win_tile, tsumo=False).as_dict(),
         "tsumo": score_hand(hand, settings, win_tile, tsumo=True).as_dict(),
+        "tsumo_other": other.as_dict() | {"dealer": not settings.is_dealer},
+        "dealer": settings.is_dealer,
         "selected": "tsumo" if settings.is_tsumo else "ron",
     }

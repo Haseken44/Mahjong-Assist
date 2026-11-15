@@ -540,9 +540,30 @@ function renderAnalysis(a) {
   if (a.scores) {
     const wrap = document.createElement("div");
     wrap.className = "score-pair";
-    wrap.append(scoreCard(a.scores.ron, "ロンなら（捨て牌でアガリ）", a.scores.selected === "ron"),
-      scoreCard(a.scores.tsumo, "ツモなら（自分で引いてアガリ）", a.scores.selected === "tsumo"));
+    const me = a.scores.dealer ? "親" : "子";
+    const tsumoCard = scoreCard(a.scores.tsumo, `ツモなら（あなたは${me}）`, a.scores.selected === "tsumo");
+    const o = a.scores.tsumo_other;
+    if (o && o.ok) {
+      // 親・子を入れ替えた場合の支払いも参考に出す（自風の設定に関係なく、子のツモの配分が見えるように）
+      const ref = document.createElement("div");
+      ref.className = "other-pay";
+      const who = o.dealer ? "親" : "子";
+      ref.append(span(`参考：${who}がツモした場合 ${o.total.toLocaleString()}点`, "meta"));
+      const ul = document.createElement("ul");
+      (o.pays || []).forEach((p) => {
+        const l = document.createElement("li");
+        l.textContent = `${p.who} ${p.points.toLocaleString()}点`;
+        ul.append(l);
+      });
+      ref.append(ul);
+      tsumoCard.insertBefore(ref, tsumoCard.querySelector(".hanfu"));
+    }
+    wrap.append(scoreCard(a.scores.ron, `ロンなら（あなたは${me}）`, a.scores.selected === "ron"), tsumoCard);
     $("score").append(wrap);
+    const note = document.createElement("p");
+    note.className = "tip";
+    note.textContent = `いまの設定：自風 ${$("seatWind").selectedOptions[0].textContent}。親か子かは「局の設定」の自風で切り替えます（東＝親）。`;
+    $("score").append(note);
   } else if (a.score) {
     $("score").append(scoreCard(a.score, a.score.tsumo ? "ツモ" : "ロン", true));
   }
