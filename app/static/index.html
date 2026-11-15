@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f5132">
   <title>麻雀アシスト</title>
-  <link rel="stylesheet" href="/static/style.css?v=7">
+  <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
   <header class="topbar">
@@ -20,7 +20,7 @@
         <ol class="steps">
           <li id="step1"><b>「カメラ開始」を押す</b>（下の緑のボタン）。カメラの使用を聞かれたら「許可」します。</li>
           <li id="step2"><b>緑の枠に手牌を入れる</b>：スマホを<b>縦のまま</b>手牌の上にかざし、手牌を横一列に枠の中へ。枠の幅いっぱいに映すほど正確です。読めた牌は自動で下の「手牌」に並びます。</li>
-          <li id="step3"><b>アシストを見る</b>：「何を切るとよいか」「狙える役」「点数」が出ます。切ったあとも自動で読み直します。</li>
+          <li id="step3"><b>「OK」で確定してアシストを見る</b>：手牌が正しく並んだら「OK」を押すと、カメラが止まり手牌が固定されます。「何を切るとよいか」「狙える役」「点数」を見ます。ツモ・打牌のあとは「読み直す」で次の手牌を映します。</li>
         </ol>
         <p class="tip">必要なときだけ：ドラ表示牌や鳴きは「手牌」の下のボタンで、人数・自風は「局の設定」で変えます。読み違えた牌（点線の牌）はタップして正しい牌ボタンを押すと直せます。</p>
       </details>
@@ -34,6 +34,7 @@
       </div>
       <div class="row">
         <button id="cameraBtn" class="primary">カメラ開始</button>
+        <button id="okBtn" class="ok" hidden>OK（この手牌で確定）</button>
       </div>
       <div id="camControls" class="cam-controls" hidden>
         <label id="camSelectBox" hidden>カメラ
@@ -56,7 +57,7 @@
 
     <section class="card">
       <div class="section-head">
-        <h2>手牌 <small id="count">0枚</small> <small id="manualBadge" class="manual" hidden>手で修正中</small></h2>
+        <h2>手牌 <small id="count">0枚</small> <small id="manualBadge" class="manual" hidden>手で修正中</small> <small id="lockBadge" class="locked" hidden>確定済み</small></h2>
         <div class="mini-actions">
           <button id="sortBtn">理牌</button>
           <button id="clearBtn">全消去</button>
@@ -156,6 +157,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">鳴き（ポン・チー・カン）とドラ表示牌は画面のボタンで入力します。カメラで自動的に読み取るのは手牌だけです（鳴き・ドラ表示牌の自動認識は今後対応予定）。<br>v0.4</footer>
-  <script src="/static/app.js?v=7"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

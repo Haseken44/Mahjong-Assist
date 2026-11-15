@@ -158,3 +158,5 @@ label.inline input, label.inline select { width: auto; min-width: 72px; }
 .inline-check { display: inline-flex !important; align-items: center; gap: 4px; }
 .debug { font-size: .75rem; color: var(--muted); margin: 6px 0 0; font-family: ui-monospace, monospace; }
 .tile.unsure { outline: 2px dashed var(--warn); outline-offset: 1px; }
+button.ok { background: var(--accent); color: #fff; border-color: transparent; font-weight: 700; }
+.locked { color: var(--good); font-weight: 700; }

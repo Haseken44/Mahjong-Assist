@@ -586,7 +586,9 @@ function onDetection(msg) {
   if (hint) status.textContent = (msg.seen ? `${msg.seen}枚を検出。` : "") + hint;
   else if (msg.unknown) status.textContent = `${msg.seen}枚を読み取り中（自信のない牌 ${msg.unknown}枚は点線で表示。違っていたらタップして直せます）`;
   else status.textContent = `${msg.seen}枚を認識中`;
+  if (state.locked) return;  // 「OK」で確定済み（カメラ停止の直前に届いた結果は無視）
   updateSteps(msg.seen > 0 && state.hand.length > 0);
+  $("okBtn").hidden = !(state.stream && state.hand.length);
   if (state.manual) return;
   if (msg.hand && JSON.stringify(msg.hand) !== JSON.stringify(state.hand)) {
     // 手牌が変わった（プレイヤーがアシストと違う牌を切った場合も含む）→ 読み直して分析を更新
@@ -646,6 +648,8 @@ async function toggleCamera() {
       state.stream = await openCamera(null);  // 前回のカメラが無い → 既定の背面カメラ
     }
     video.srcObject = state.stream;
+    setLocked(false);
+    setManual(false);
     $("cameraHint").hidden = true;
     $("cameraBtn").textContent = "カメラ停止";
     $("mode").classList.add("live");
@@ -731,7 +735,8 @@ function stopCamera() {
   state.stream = null;
   video.srcObject = null;
   $("cameraHint").hidden = false;
-  $("cameraBtn").textContent = "カメラ開始";
+  $("cameraBtn").textContent = state.hand.length ? "読み直す（カメラ再開）" : "カメラ開始";
+  $("okBtn").hidden = true;
   $("mode").classList.remove("live");
   $("camControls").hidden = true;
   $("viewport").style.aspectRatio = "";
@@ -817,8 +822,28 @@ function drawBoxes(dets) {
 
 // 使い方の「いまどのステップか」を強調する
 function updateSteps(recognized) {
-  const step = !state.stream ? 1 : recognized ? 3 : 2;
+  const step = state.locked ? 3 : !state.stream ? 1 : recognized ? 3 : 2;
   [1, 2, 3].forEach((i) => $(`step${i}`).classList.toggle("now", i === step));
+}
+
+// 「OK」：いま並んでいる手牌で確定。カメラを止め、スマホを動かしても手牌が変わらないようにする
+function confirmHand() {
+  if (!state.hand.length) return flash("まだ手牌が読めていません");
+  setLocked(true);
+  if (state.stream) stopCamera();
+  state.unsure = null;
+  renderHand();
+  requestAnalysis();
+  updateSteps(true);
+  flash("手牌を確定しました。次のツモ・打牌のあとは「読み直す」を押してください", false);
+  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function setLocked(v) {
+  state.locked = v;
+  $("lockBadge").hidden = !v;
+  $("viewport").hidden = v;  // 確定中は映像の枠を畳んで、手牌とアシストを見やすくする
+  if (v) $("camStatus").textContent = "手牌を確定しました（カメラ停止中）。次の手牌は「読み直す」で映します。";
 }
 
 // 手で修正中は自動更新を止める。「自動に戻す」で再開
@@ -841,6 +866,7 @@ function init() {
   renderHand();
   connect();
   $("cameraBtn").addEventListener("click", toggleCamera);
+  $("okBtn").addEventListener("click", confirmHand);
   $("camSelect").addEventListener("change", (e) => switchCamera(e.target.value));
   $("zoom").addEventListener("input", (e) => {
     const track = state.stream && state.stream.getVideoTracks()[0];
