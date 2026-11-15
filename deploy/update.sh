@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# 【Webサーバ(os3-379-22658)】で実行する
 # サーバー上で最新版に更新して再起動する: bash deploy/update.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."

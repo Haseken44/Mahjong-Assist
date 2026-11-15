@@ -11,6 +11,8 @@
 - 4人がそれぞれ自分のスマホで同時に使う。接続ごとの状態は `PlayerSession` に閉じ込め、グローバルな可変状態は見本ストア（全員共有）だけにする。
 - 本番は `127.0.0.1:8030` で uvicorn（workers=1）。nginx が https://mahjong-assist.dxc-labo.cloud から転送する。同じサーバーの他サイト（ポート 8000, 8010-8014, 8020, 8021）に触れない。
 
+- 手順やコマンドを書くときは、実行場所を必ず明記する：【PC(ubuntu26)】【Webサーバ(os3-379-22658)】【ブラウザ(GitHub)】【スマホ】（README の「実行場所の表記」参照）。
+
 ## コマンド
 - 開発サーバー: `uvicorn app.main:app --reload --port 8030`
 - テスト: `pytest -q`

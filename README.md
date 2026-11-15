@@ -26,7 +26,7 @@
 1. **見本照合方式（標準）**: 画像処理で白い牌の面を見つけて1枚ずつ切り出し、登録された「見本」と照合します。CPU だけで1フレーム約0.1秒。
    - 牌セットによって絵柄が違うため、**最初に一度、その卓の牌を覚えさせます**。手牌を横一列に並べてカメラに映し、画面下で左から順に正しい牌を入力して「この並びで覚える」を押します。37種類（34種＋赤五3種）がひと通り映るまで数回くり返すと、以降は自動で読めます。
    - 見本はサーバーの `data/templates/` に保存され、全員で共有されます（同じ卓の誰かが覚えさせれば4人全員に効く）。読み違いを直して「覚える」たびに精度が上がります。
-   - 別の牌セットに切り替えるときは `data/templates/` を消してください。
+   - 別の牌セットに切り替えるときは【Webサーバ(os3-379-22658)】で `rm -rf ~/mahjong-assist/data/templates` を実行し、`sudo systemctl restart mahjong-assist` してください。
 2. **YOLO 方式（任意）**: `models/mahjong_best.pt`（Ultralytics YOLOv8/YOLO11 の学習済み牌検出モデル）を置き、`requirements-vision.txt` をインストールすると自動でこちらに切り替わります。クラス名は `1m`〜`9m`, `1p`〜`9p`, `1s`〜`9s`, `1z`(東)〜`7z`(中), 赤五 `0m/0p/0s` を推奨（`3man`, `5p_red`, `chun` などの別名も自動変換）。
 
 共通: 「横一列に並んだ一番牌の多い行」を手牌とみなし左から右へ並べます。直近5フレーム中3回同じ手牌が読めたときだけ確定し、表示のちらつきを抑えます。
@@ -54,7 +54,20 @@ deploy/                systemd ユニット・nginx 設定例・更新スクリ�
 tests/                 単体テスト
 ```
 
+## 実行場所の表記
+
+コマンドや操作には、どこで実行するかを必ず付けています。
+
+| 表記 | 場所 |
+|---|---|
+| 【PC(ubuntu26)】 | 開発用PC（`/home/dev-admin/CodeEdit/麻雀アシストサイト`） |
+| 【Webサーバ(os3-379-22658)】 | 本番サーバー（`ubuntu` ユーザー、mahjong-assist.dxc-labo.cloud） |
+| 【ブラウザ(GitHub)】 | github.com での操作（PR のマージなど） |
+| 【スマホ】 | プレイヤーのスマホのブラウザ |
+
 ## ローカル開発
+
+【PC(ubuntu26)】
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
@@ -65,7 +78,13 @@ pytest -q
 
 ## サーバーへのデプロイ（Ubuntu 24.04 / Python 3.12）
 
-nginx（https://mahjong-assist.dxc-labo.cloud → http://127.0.0.1:8030）と証明書は設定済みの前提です。以下を `ubuntu` ユーザーで実行します。
+nginx（https://mahjong-assist.dxc-labo.cloud → http://127.0.0.1:8030）と証明書は設定済みの前提です。
+
+0. 【ブラウザ(GitHub)】反映したい PR を main にマージしておく（サーバーは main を取得します）
+
+1〜5 はすべて【Webサーバ(os3-379-22658)】で `ubuntu` ユーザーとして実行します。
+
+【Webサーバ(os3-379-22658)】
 
 ```bash
 # 1. 必要パッケージ（未導入なら）
@@ -83,7 +102,7 @@ python3 -m venv .venv
 
 # 4. 動作確認（Ctrl+C で終了）
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8030
-#   別ターミナルで: curl http://127.0.0.1:8030/healthz  → {"status":"ok","detector":"template"}
+#   【Webサーバ(os3-379-22658)】の別ターミナルで: curl http://127.0.0.1:8030/healthz  → {"status":"ok","detector":"template"}
 
 # 5. systemd に登録して常駐
 sudo cp deploy/mahjong-assist.service /etc/systemd/system/
@@ -93,12 +112,17 @@ sudo systemctl status mahjong-assist --no-pager
 curl https://mahjong-assist.dxc-labo.cloud/healthz
 ```
 
+6. 【スマホ】 https://mahjong-assist.dxc-labo.cloud を開き、「カメラ開始」を押す
+
 - ユーザー名やパスが `ubuntu` / `/home/ubuntu/mahjong-assist` と違う場合は `deploy/mahjong-assist.service` の `User`, `Group`, `WorkingDirectory`, `ExecStart` を合わせてください。
 - nginx 側の設定例は `deploy/nginx-mahjong-assist.conf`（WebSocket の `Upgrade` ヘッダーが必要）。
 - ログ: `journalctl -u mahjong-assist -f`
 - 4人同時利用時の負荷はおよそ CPU 1〜2コア分です。同時に画像処理するフレーム数は環境変数 `MAHJONG_FRAME_SLOTS`（既定 4）で調整できます。
 
 ### 更新
+
+1. 【ブラウザ(GitHub)】PR を main にマージ
+2. 【Webサーバ(os3-379-22658)】
 
 ```bash
 cd ~/mahjong-assist && bash deploy/update.sh
@@ -108,10 +132,18 @@ cd ~/mahjong-assist && bash deploy/update.sh
 
 PyTorch を含むため数 GB のディスクと十分なメモリが必要です。CPU のみのサーバーでは 1 フレーム数百 ms〜1 秒程度かかります。
 
+【PC(ubuntu26)】モデルファイルをサーバーへ送る
+
 ```bash
+scp mahjong_best.pt ubuntu@mahjong-assist.dxc-labo.cloud:~/mahjong-assist/models/mahjong_best.pt
+```
+
+【Webサーバ(os3-379-22658)】
+
+```bash
+cd ~/mahjong-assist
 .venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 .venv/bin/pip install -r requirements-vision.txt
-cp /path/to/mahjong_best.pt models/mahjong_best.pt
 sudo systemctl restart mahjong-assist
 curl http://127.0.0.1:8030/healthz   # → "detector":"yolo"
 ```
