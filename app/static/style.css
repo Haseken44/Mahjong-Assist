@@ -114,3 +114,26 @@ video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; objec
 .toast.err { background: var(--accent); }
 [hidden] { display: none !important; }
 .players-switch { display: flex; gap: 16px; margin: 0 0 10px; font-size: .95rem; font-weight: 600; }
+h3.sub { color: var(--ink); margin: 14px 0 6px; font-size: .95rem; }
+h3.sub small { color: var(--muted); font-weight: normal; font-size: .78rem; margin-left: 4px; }
+.meld-buttons button { min-height: 40px; padding: 6px 8px; }
+.melds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.meld { display: flex; align-items: center; gap: 6px; padding: 4px 8px; min-height: 0; }
+.dora-slots { display: flex; flex-wrap: wrap; gap: 6px; }
+.dora-slot { display: flex; align-items: center; gap: 6px; padding: 6px 10px; min-height: 44px; }
+.dora-slot.picking, .pick-banner { outline: 3px solid var(--accent); }
+label.inline { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: .85rem; color: var(--muted); }
+label.inline input, label.inline select { width: auto; min-width: 72px; }
+.pick-banner {
+  position: sticky; top: 52px; z-index: 5; display: flex; align-items: center; gap: 8px; margin: 10px 0 6px;
+  padding: 8px 10px; border-radius: 10px; background: var(--card); font-size: .88rem; font-weight: 600;
+}
+.pick-banner span { flex: 1; }
+.pick-banner button { min-height: 36px; padding: 4px 10px; }
+#rulesCard summary { cursor: pointer; list-style: none; }
+#rulesCard summary h2 { display: inline; }
+#rulesCard summary::after { content: " ▼"; color: var(--muted); font-size: .8rem; }
+#rulesCard[open] summary::after { content: " ▲"; }
+.rule-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 12px; margin: 10px 0; font-size: .9rem; }
+.rule-list label.check { display: flex; align-items: center; gap: 6px; }
+.rule-list input[type=checkbox] { width: 22px; height: 22px; }

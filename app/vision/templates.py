@@ -23,7 +23,7 @@ DATA_DIR = Path(os.environ.get("MAHJONG_DATA_DIR", Path(__file__).resolve().pare
 MAX_PER_TILE = 20
 SIZE = (32, 48)  # 幅, 高さ
 COLOR_WEIGHT = 3.0
-UNKNOWN_DISTANCE = 0.75  # これより似ていなければ「？（不明）」
+UNKNOWN_DISTANCE = 1.0  # これより似ていなければ「？（不明）」
 AUG_COUNT = 8  # augment() が返す枚数
 
 _hog = cv2.HOGDescriptor(SIZE, (16, 16), (8, 8), (8, 8), 9)
@@ -79,8 +79,16 @@ def augment(tile_img: np.ndarray) -> list[np.ndarray]:
 
 
 class TemplateStore:
-    def __init__(self, root: Path = DATA_DIR / "templates"):
+    """見本の保存先は2つ。
+
+    - root（data/templates/）: プレイヤーが画面で「覚える」で教えた見本
+    - seed（data/templates_seed/）: 牌の一覧画像から tools/import_tile_sheet.py で取り込んだ初期見本。
+      写真を差し替えるときは同ツールの --replace でここだけ入れ替える。
+    """
+
+    def __init__(self, root: Path = DATA_DIR / "templates", seed: Path | None = None):
         self.root = root
+        self.seed = seed if seed is not None else root.parent / (root.name + "_seed")
         self.lock = threading.Lock()
         self.labels: list[str] = []
         self.features = np.zeros((0, 1), np.float32)
@@ -88,8 +96,10 @@ class TemplateStore:
 
     def reload(self) -> None:
         labels, feats = [], []
-        if self.root.exists():
-            for d in sorted(self.root.iterdir()):
+        for base in (self.seed, self.root):
+            if not base.exists():
+                continue
+            for d in sorted(base.iterdir()):
                 if not d.is_dir():
                     continue
                 try:
@@ -122,9 +132,9 @@ class TemplateStore:
         c = Counter(self.labels)
         return {t: n // AUG_COUNT for t, n in sorted(c.items())}
 
-    def add(self, tile: str, tile_img: np.ndarray) -> None:
+    def add(self, tile: str, tile_img: np.ndarray, seed: bool = False) -> None:
         T.validate(tile)
-        d = self.root / tile
+        d = (self.seed if seed else self.root) / tile
         d.mkdir(parents=True, exist_ok=True)
         # ファイル名は乱数のみ（時刻を入れると同時に学習した牌＝手牌がまとまって分かってしまう）
         name = f"{uuid.uuid4().hex}.png"

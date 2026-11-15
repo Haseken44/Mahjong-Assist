@@ -69,31 +69,30 @@ def to_34_array(tiles: Iterable[str]) -> list[int]:
 
 
 def to_136_array(tiles: Iterable[str]) -> list[int]:
-    """手牌を136番号に変換する。赤五は各五の1枚目（ライブラリの赤ドラ番号）を使う。"""
+    """牌を136番号に変換する（入力と同じ順番で返す）。赤五は各五の1枚目（ライブラリの赤ドラ番号）を使う。"""
     tiles = list(tiles)
-    used: dict[int, list[int]] = {}
-    result: list[int] = []
-    # 赤五を先に割り当てる
-    for t in sorted(tiles, key=lambda x: 0 if is_red(x) else 1):
+    used: dict[int, set[int]] = {}
+    result: list[int | None] = [None] * len(tiles)
+    # 赤五を先に割り当て、通常の五が赤の番号を使わないようにする
+    order = sorted(range(len(tiles)), key=lambda i: 0 if is_red(tiles[i]) else 1)
+    for i in order:
+        t = tiles[i]
         idx = to_34(t)
-        copies = used.setdefault(idx, [])
+        copies = used.setdefault(idx, set())
         if is_red(t):
             if 0 in copies:
                 raise TileError(f"赤五が重複しています: {t}")
             copy = 0
         else:
             free = [c for c in range(4) if c not in copies]
-            # 通常の五は赤（copy 0）を避ける
             if idx in (4, 13, 22):
                 free = [c for c in free if c != 0] or free
             if not free:
                 raise TileError(f"同じ牌が5枚以上あります: {normalize(t)}")
             copy = free[0]
-        if len(copies) >= 4:
-            raise TileError(f"同じ牌が5枚以上あります: {normalize(t)}")
-        copies.append(copy)
-        result.append(idx * 4 + copy)
-    return result
+        copies.add(copy)
+        result[i] = idx * 4 + copy
+    return result  # type: ignore[return-value]
 
 
 def tile_to_136(tile: str, hand_136: list[int]) -> int:

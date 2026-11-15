@@ -148,7 +148,7 @@ def test_sanma_tsumo_son_vs_split():
     hand = h("1p 2p 3p 4p 5p 6p 7p 8p 9p 2s 3s 4s 5s 5s")
     # 子のツモ：ツモ損ありは2人分だけ、折半なら北家分も2人で払う
     son = score_hand(hand, S3(seat_wind="south", is_riichi=True, is_tsumo=True))
-    split = score_hand(hand, S3(seat_wind="south", is_riichi=True, is_tsumo=True, tsumo_son=False))
+    split = score_hand(hand, S3(seat_wind="south", is_riichi=True, is_tsumo=True, rules={"sanma_tsumo_son": False}))
     four = score_hand(hand, RoundSettings(seat_wind="south", is_riichi=True, is_tsumo=True))
     assert son.total < four.total
     assert split.total >= four.total
@@ -164,3 +164,106 @@ def test_sanma_hints():
     names = [x["name"] for x in a["hints"]]
     assert "抜きドラ（北）" in names
     assert "三色同順（サンショク）" not in names
+
+
+# ---------- 鳴き・カン・ドラ・ルール ----------
+
+def test_pon_yakuhai_open_hand_score():
+    s = RoundSettings(seat_wind="south", melds=[{"type": "pon", "tiles": ["7z", "7z", "7z"]}])
+    r = score_hand(h("2m 3m 4m 5p 6p 7p 3s 4s 5s 9s 9s"), s, win_tile="9s")
+    assert r.ok and "役牌 中" in [y["name"] for y in r.yaku]
+
+
+def test_open_hand_without_yaku():
+    s = RoundSettings(seat_wind="south", melds=[{"type": "chi", "tiles": ["1m", "2m", "3m"]}])
+    r = score_hand(h("4p 5p 6p 7s 8s 9s 2p 3p 4p 9s 9s"), s)
+    assert not r.ok
+
+
+def test_kuitan_rule():
+    hand = h("2m 3m 4m 5p 6p 7p 3s 4s 5s 6s 6s")
+    melds = [{"type": "chi", "tiles": ["4p", "5p", "6p"]}]
+    assert score_hand(hand, RoundSettings(seat_wind="south", melds=melds)).ok
+    assert not score_hand(hand, RoundSettings(seat_wind="south", melds=melds, rules={"kuitan": False})).ok
+
+
+def test_riichi_ignored_when_open():
+    s = RoundSettings(seat_wind="south", is_riichi=True, melds=[{"type": "pon", "tiles": ["7z", "7z", "7z"]}])
+    r = score_hand(h("2m 3m 4m 5p 6p 7p 3s 4s 5s 9s 9s"), s)
+    assert r.ok and "立直" not in [y["name"] for y in r.yaku]
+
+
+def test_kan_adds_dora_indicator_slot_and_limits():
+    kan = {"type": "ankan", "tiles": ["1z"] * 4}
+    # 自分のカン1回 → ドラ表示牌は2枚まで
+    s = RoundSettings(seat_wind="east", melds=[kan], dora_indicators=["4z", "1p"])
+    assert s.table_kans == 1
+    with pytest.raises(ValueError):
+        RoundSettings(melds=[kan], dora_indicators=["4z", "1p", "2p"])
+    # 卓全体で最大4回、ドラ表示牌は最大5枚
+    RoundSettings(table_kans=4, dora_indicators=["1p", "2p", "3p", "4p", "5p"])
+    with pytest.raises(ValueError):
+        RoundSettings(table_kans=5)
+    with pytest.raises(ValueError):
+        RoundSettings(melds=[{"type": "kan", "tiles": [t] * 4} for t in ("1p", "2p", "3p", "4p")] + [{"type": "kan", "tiles": ["5s"] * 4}])
+    # カンドラなしのルールなら表示牌は1枚だけ
+    with pytest.raises(ValueError):
+        RoundSettings(table_kans=1, dora_indicators=["1p", "2p"], rules={"kan_dora": False})
+
+
+def test_ankan_score_with_kan_dora():
+    kan = {"type": "ankan", "tiles": ["1z"] * 4}
+    s = RoundSettings(seat_wind="east", round_wind="east", is_tsumo=True, melds=[kan], dora_indicators=["4z"])
+    r = score_hand(h("1m 2m 3m 4p 5p 6p 7s 8s 9s 2s 2s"), s, win_tile="2s")
+    assert r.ok
+    names = {y["name"]: y["han"] for y in r.yaku}
+    assert names["ドラ"] == 4  # 北が表示牌 → 東がドラ、暗カンで4枚
+    assert "門前清自摸和" in names  # 暗カンは門前のまま
+
+
+def test_ura_dora_only_with_riichi():
+    hand = h("2m 3m 4m 5p 6p 7p 3s 4s 5s 6s 7s 8s 9p 9p")
+    s = RoundSettings(seat_wind="south", is_riichi=True, dora_indicators=["1z"], ura_indicators=["8p"])
+    assert {y["name"]: y["han"] for y in score_hand(hand, s).yaku}["裏ドラ"] == 2
+    with pytest.raises(ValueError):
+        RoundSettings(seat_wind="south", is_riichi=True, ura_indicators=["8p"], rules={"ura_dora": False})
+
+
+def test_aka_dora_rule_off():
+    hand = h("2m 3m 4m 0p 6p 7p 3s 4s 5s 6s 7s 8s 9p 9p")
+    r = score_hand(hand, RoundSettings(seat_wind="south", is_riichi=True, rules={"aka_dora": False}))
+    assert not r.ok
+
+
+def test_honba_values():
+    hand = h("2m 3m 4m 3p 4p 5p 6p 7p 8p 2s 2s 6s 7s 8s")
+    r4 = score_hand(hand, RoundSettings(seat_wind="south", honba=2))
+    assert r4.total == 2000 + 600
+    hand3 = h("1p 2p 3p 3p 4p 5p 6p 7p 8p 2s 2s 6s 7s 8s")
+    base3 = score_hand(hand3, RoundSettings(players=3, seat_wind="south")).total
+    r3 = score_hand(hand3, RoundSettings(players=3, seat_wind="south", honba=2))
+    assert r3.total == base3 + 400
+
+
+def test_analyze_with_melds_counts_and_waits():
+    s = RoundSettings(seat_wind="south", melds=[{"type": "pon", "tiles": ["7z", "7z", "7z"]}])
+    a = analyze(h("2m 3m 4m 5p 6p 7p 3s 4s 5s 9s"), s)
+    assert a["shanten"] == 0
+    assert a["waits"][0]["tile"] == "9s" and a["waits"][0]["ok"]
+    a2 = analyze(h("2m 3m 4m 5p 6p 7p 3s 4s 5s 9s 1z"), s)
+    assert a2["discards"][0]["discard"] in ("1z", "9s")
+    names = [x["name"] for x in a2["hints"]]
+    assert "立直" not in names and "七対子（チートイツ）" not in names
+
+
+def test_sanma_chi_not_allowed_by_default():
+    with pytest.raises(ValueError):
+        RoundSettings(players=3, melds=[{"type": "chi", "tiles": ["1p", "2p", "3p"]}])
+    RoundSettings(players=3, melds=[{"type": "chi", "tiles": ["1p", "2p", "3p"]}], rules={"sanma_chi": True})
+
+
+def test_bad_meld_shapes():
+    for m in ({"type": "pon", "tiles": ["1m", "1m", "2m"]}, {"type": "chi", "tiles": ["8p", "9p", "1s"]},
+              {"type": "chi", "tiles": ["1z", "2z", "3z"]}, {"type": "kan", "tiles": ["1m"] * 3}):
+        with pytest.raises(ValueError):
+            RoundSettings(melds=[m])

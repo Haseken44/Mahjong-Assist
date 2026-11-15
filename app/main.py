@@ -54,6 +54,14 @@ async def healthz() -> dict:
     return {"status": "ok", "detector": detector.mode}
 
 
+@app.get("/api/rules")
+async def rules() -> dict:
+    """ルール設定画面用：プリセットと各項目の説明。"""
+    from .logic.rules import PRESETS, RULE_LABELS
+
+    return {"presets": {k: v.model_dump() for k, v in PRESETS.items()}, "labels": RULE_LABELS}
+
+
 @app.get("/api/info")
 async def info() -> dict:
     # 牌ごとの登録数は返さない（誰かが学習した直後の増え方から手牌を推測されないように）
@@ -113,7 +121,7 @@ def _process_frame(data: bytes | str, sess: PlayerSession) -> dict:
         return {"type": "error", "message": "画像を読み込めませんでした"}
     img = preprocess(img)
     sess.last_frame = img
-    dets = detector.detect(img)
+    dets = _drop_meld_tiles(detector.detect(img), sess.settings)
     tiles = [d.tile for d in dets]
     hand, changed = sess.stab.push(tiles)
     out = {
@@ -134,6 +142,17 @@ def _process_frame(data: bytes | str, sess: PlayerSession) -> dict:
     return out
 
 
+def _drop_meld_tiles(dets: list, settings: RoundSettings) -> list:
+    """鳴いた牌を手牌の右側に並べている場合、その分を手牌から除く（同じ行に映るため）。"""
+    if not settings.melds:
+        return dets
+    meld_n = len(settings.meld_tiles)
+    full = 14 - 3 * len(settings.melds)
+    if len(dets) in (full - 1 + meld_n, full + meld_n):
+        return dets[: len(dets) - meld_n]
+    return dets
+
+
 def _teach(sess: PlayerSession, tiles: list[str]) -> dict:
     """直近のフレームに映っている牌を、プレイヤーが入力した並び（左から順）で見本として登録する。"""
     store = getattr(detector, "store", None)
@@ -145,6 +164,9 @@ def _teach(sess: PlayerSession, tiles: list[str]) -> dict:
 
     tiles = [T.validate(t) for t in tiles]
     boxes = find_tiles(sess.last_frame)
+    meld_tiles = sess.settings.meld_tiles
+    if meld_tiles and len(boxes) == len(tiles) + len(meld_tiles):
+        tiles = tiles + meld_tiles  # 右側に並べた鳴きの牌もまとめて覚える
     if len(boxes) != len(tiles):
         return {"type": "error", "message": f"枚数が合いません（映っている牌 {len(boxes)}枚 / 入力 {len(tiles)}枚）。牌を横一列に並べて映し直してください"}
     pairs = list(zip(tiles, boxes))

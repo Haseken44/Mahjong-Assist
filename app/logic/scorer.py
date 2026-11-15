@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 
 from mahjong.constants import EAST, NORTH, SOUTH, WEST
 from mahjong.hand_calculating.hand import HandCalculator
-from mahjong.hand_calculating.hand_config import HandConfig, OptionalRules
+from mahjong.hand_calculating.hand_config import HandConfig, HandConstants, OptionalRules
+from mahjong.meld import Meld
 from mahjong.hand_calculating.scores import ScoresCalculator
 
 from . import tiles as T
@@ -47,7 +48,6 @@ ERROR_JA = {
 
 _calculator = HandCalculator()
 _scores = ScoresCalculator()
-_rules = OptionalRules(has_aka_dora=True, has_open_tanyao=True)
 
 
 @dataclass
@@ -66,16 +66,28 @@ class ScoreResult:
         return self.__dict__.copy()
 
 
+def _options(s: RoundSettings) -> OptionalRules:
+    r = s.rules
+    return OptionalRules(
+        has_aka_dora=r.aka_dora,
+        has_open_tanyao=r.kuitan,
+        has_double_yakuman=r.double_yakuman,
+        kazoe_limit=HandConstants.KAZOE_LIMITED if r.kazoe_yakuman else HandConstants.KAZOE_SANBAIMAN,
+        kiriage=r.kiriage,
+    )
+
+
 def _config(s: RoundSettings) -> HandConfig:
+    riichi = s.is_riichi and not s.is_open  # 鳴いているとリーチできない
     return HandConfig(
         is_tsumo=s.is_tsumo,
-        is_riichi=s.is_riichi,
-        is_ippatsu=s.is_ippatsu and s.is_riichi,
+        is_riichi=riichi,
+        is_ippatsu=s.is_ippatsu and riichi and s.rules.ippatsu,
         player_wind=WIND_CONST[s.seat_wind],
         round_wind=WIND_CONST[s.round_wind],
         kyoutaku_number=s.kyoutaku,
-        tsumi_number=s.honba,
-        options=_rules,
+        tsumi_number=0,  # 本場はルールの加算額で自前計算する
+        options=_options(s),
     )
 
 
@@ -86,10 +98,15 @@ def _ceil100(x: float) -> int:
 def _payments(cost: dict, s: RoundSettings) -> tuple[int, str]:
     """(アガった人が受け取る合計, 支払いの説明) を返す。三麻のツモ損/折半に対応。"""
     kyoutaku = s.kyoutaku * 1000
+    per_honba = s.rules.honba_3p if s.is_sanma else s.rules.honba_4p
+    payers = 2 if s.is_sanma else 3
+    honba_each = _ceil100(per_honba * s.honba / payers) if s.honba else 0
+    cost = dict(cost, main_bonus=honba_each, additional_bonus=honba_each)
     dealer_pay = cost["main"] + cost["main_bonus"]
     child_pay = cost["additional"] + cost["additional_bonus"]
     if not s.is_tsumo:
-        return dealer_pay + kyoutaku, f"ロン {dealer_pay}点"
+        ron = cost["main"] + per_honba * s.honba
+        return ron + kyoutaku, f"ロン {ron}点"
 
     if s.players == 4:
         if s.is_dealer:
@@ -111,56 +128,87 @@ def _payments(cost: dict, s: RoundSettings) -> tuple[int, str]:
     return d + c + kyoutaku, f"ツモ 子{c}点 / 親{d}点（北家分折半）"
 
 
-def _lib_indicator(indicator: str, s: RoundSettings) -> int:
-    """ライブラリは四人麻雀の「次の牌」でドラを決めるので、三麻の 1m→9m だけ 8m として渡す。"""
-    if s.is_sanma and T.normalize(indicator) == "1m":
-        indicator = "8m"
-    return T.to_34(indicator) * 4 + 1
+def _build_tiles(hand: list[str], s: RoundSettings) -> tuple[list[int], list[Meld]]:
+    """手牌（鳴き以外）と鳴きの牌を、重複しない136番号にまとめて変換する。"""
+    all_tiles = list(hand) + s.meld_tiles
+    ids = T.to_136_array(all_tiles)
+    hand_ids = ids[: len(hand)]
+    melds, pos = [], len(hand)
+    for m in s.melds:
+        mids = ids[pos: pos + len(m.tiles)]
+        pos += len(m.tiles)
+        kind = {"pon": Meld.PON, "chi": Meld.CHI, "kan": Meld.KAN, "ankan": Meld.KAN}[m.type]
+        melds.append(Meld(meld_type=kind, tiles=mids, opened=m.opened))
+    return hand_ids + ids[len(hand):], melds
+
+
+def _dora_count(tiles: list[str], indicators: list[str], s: RoundSettings) -> int:
+    dora = [T.sanma_dora_from_indicator(i) if s.is_sanma else _next_tile(i) for i in indicators]
+    names = [T.normalize(t) for t in tiles]
+    return sum(names.count(d) for d in dora)
+
+
+def _next_tile(indicator: str) -> str:
+    t = T.normalize(indicator)
+    n, suit = int(t[0]), t[1]
+    if suit == "z":
+        return f"{n % 4 + 1}z" if n <= 4 else f"{(n - 5 + 1) % 3 + 5}z"
+    return f"{n % 9 + 1}{suit}"
 
 
 def score_hand(hand: list[str], settings: RoundSettings, win_tile: str | None = None) -> ScoreResult:
-    """14枚の手牌の点数を計算する。win_tile 省略時は settings.win_tile、それも無ければ最後の牌。"""
-    if len(hand) != 14:
-        return ScoreResult(ok=False, error="点数計算には14枚の手牌が必要です")
-    T.check_counts(hand + settings.dora_indicators)
-    if settings.is_sanma:
+    """アガリ形の点数を計算する。hand は鳴き以外の手牌（14 − 3×鳴きの数 枚）。
+
+    win_tile 省略時は settings.win_tile、それも無ければ手牌の最後の牌。
+    """
+    s = settings
+    need = 14 - 3 * len(s.melds)
+    if len(hand) != need:
+        return ScoreResult(ok=False, error=f"点数計算には鳴き以外の手牌が{need}枚必要です")
+    T.check_counts(hand + s.meld_tiles + s.dora_indicators)
+    if s.is_sanma:
         bad = [t for t in hand if t in T.SANMA_EXCLUDED]
         if bad:
             return ScoreResult(ok=False, error=f"三人麻雀では萬子の2〜8は使いません: {', '.join(bad)}")
-    win = win_tile or settings.win_tile or hand[-1]
+    if not s.rules.aka_dora and any(T.is_red(t) for t in hand):
+        return ScoreResult(ok=False, error="このルールでは赤ドラ（赤五）はありません")
+    win = win_tile or s.win_tile or hand[-1]
     if T.normalize(win) not in [T.normalize(t) for t in hand]:
         return ScoreResult(ok=False, error=ERROR_JA["winning_tile_not_in_hand"], win_tile=win)
 
-    hand_136 = T.to_136_array(hand)
-    win_136 = T.tile_to_136(win, hand_136)
-    dora_136 = [_lib_indicator(t, settings) for t in settings.dora_indicators]
-
-    config = _config(settings)
-    r = _calculator.estimate_hand_value(hand_136, win_136, dora_indicators=dora_136 or None, config=config)
+    tiles_136, melds = _build_tiles(hand, s)
+    win_136 = T.tile_to_136(win, tiles_136[: len(hand)])
+    config = _config(s)
+    # ドラは自前で数える（三麻の 1m→9m・裏ドラ・ルールの有無に対応するため）
+    r = _calculator.estimate_hand_value(tiles_136, win_136, melds=melds or None, config=config)
     if r.error:
         return ScoreResult(ok=False, error=ERROR_JA.get(r.error, r.error), win_tile=win)
 
     yaku = [
-        {"name": YAKU_JA.get(y.yaku_id, y.name), "han": y.han_closed, "yakuman": bool(y.is_yakuman)}
+        {"name": YAKU_JA.get(y.yaku_id, y.name), "han": y.han_open if s.is_open and y.han_open else y.han_closed,
+         "yakuman": bool(y.is_yakuman)}
         for y in r.yaku
     ]
     han, cost = r.han, r.cost
     is_yakuman = any(y["yakuman"] for y in yaku)
-    if settings.is_sanma and settings.nukidora and not is_yakuman:
-        # 抜きドラ（北）は1枚につきドラ1。役ではないので、役がある場合だけ加算する
-        han += settings.nukidora
-        yaku.append({"name": "抜きドラ（北）", "han": settings.nukidora, "yakuman": False})
-        cost = _scores.calculate_scores(han, r.fu, config)
+    if not is_yakuman:
+        all_tiles = hand + s.meld_tiles
+        extra = []
+        n = _dora_count(all_tiles, s.dora_indicators, s)
+        if n:
+            extra.append(("ドラ", n))
+        if s.is_riichi and not s.is_open and s.rules.ura_dora:
+            n = _dora_count(all_tiles, s.ura_indicators, s)
+            if n:
+                extra.append(("裏ドラ", n))
+        if s.is_sanma and s.nukidora:
+            extra.append(("抜きドラ（北）", s.nukidora))
+        for name, n in extra:
+            han += n
+            yaku.append({"name": name, "han": n, "yakuman": False})
+        if extra:
+            cost = _scores.calculate_scores(han, r.fu, config)
 
-    total, payment = _payments(cost, settings)
+    total, payment = _payments(cost, s)
     level = LEVEL_JA.get(cost.get("yaku_level", ""), cost.get("yaku_level", ""))
-    return ScoreResult(
-        ok=True,
-        han=han,
-        fu=r.fu,
-        yaku=yaku,
-        total=total,
-        payment=payment,
-        level=level,
-        win_tile=win,
-    )
+    return ScoreResult(ok=True, han=han, fu=r.fu, yaku=yaku, total=total, payment=payment, level=level, win_tile=win)
