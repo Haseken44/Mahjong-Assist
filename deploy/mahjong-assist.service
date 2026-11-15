@@ -1,0 +1,20 @@
+[Unit]
+Description=Mahjong Vision Assist (FastAPI, 127.0.0.1:8030)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/mahjong-assist
+Environment=PYTHONUNBUFFERED=1
+# auto: models/mahjong_best.pt があれば YOLO、無ければ見本照合方式（template）
+Environment=MAHJONG_DETECTOR=auto
+ExecStart=/home/ubuntu/mahjong-assist/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8030 --proxy-headers --forwarded-allow-ips=127.0.0.1 --workers 1
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+# 牌の画像認識（YOLO）を使う場合のみ追加でインストール。PyTorch を含むため数GBになります。
+# CPU 版 PyTorch を入れる場合は先に:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+-r requirements.txt
+ultralytics>=8.3,<9
