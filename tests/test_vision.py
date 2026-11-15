@@ -173,3 +173,22 @@ def test_frame_hints():
     img = table_image(HAND, scale=1.4, size=(900, 480))
     assert frame_hints(img, find_tiles(img), 14) == []
     assert "partial" in frame_hints(img, find_tiles(img)[:6], 14)
+
+
+def test_tidy_face_straightens_and_centers():
+    """傾いて片寄った絵柄を、まっすぐ・中央に直す（画面表示用の牌画像）。"""
+    import numpy as np
+
+    from tools.import_tile_sheet import _ink_mask, tidy_face
+
+    face = np.full((128, 96, 3), (225, 235, 240), np.uint8)
+    for x in (30, 50):  # 縦の棒2本（索子のような絵柄）を右寄りに
+        cv2.rectangle(face, (x, 25), (x + 6, 105), (30, 30, 30), -1)
+    m = cv2.getRotationMatrix2D((48, 64), 4, 1.0)
+    face = cv2.warpAffine(face, m, (96, 128), borderValue=(225, 235, 240))
+    out, ang = tidy_face(face)
+    assert abs(ang + 4) <= 0.5
+    ink = _ink_mask(out, 200)
+    ys, xs = np.nonzero(ink)
+    cx = (xs.min() + xs.max()) / 2
+    assert abs(cx - out.shape[1] / 2) <= 2

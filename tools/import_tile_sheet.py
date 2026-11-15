@@ -208,18 +208,93 @@ def snap_face(cell: np.ndarray, M: int, cw: int, ch: int) -> np.ndarray:
     return cell[y0 + iy:y1 - iy, x0 + ix:x1 - ix].copy()
 
 
+def _ink_mask(img: np.ndarray, bg_gray: float) -> np.ndarray:
+    """牌の絵柄（黒・赤・緑・青の部分）。牌の地（アイボリー）と境目の影は含めない。"""
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    mask = ((gray < bg_gray - 45) | (hsv[:, :, 1] > 80)).astype(np.uint8) * 255
+    h, w = mask.shape
+    mx, my = max(2, int(w * 0.07)), max(2, int(h * 0.05))
+    mask[:my], mask[-my:], mask[:, :mx], mask[:, -mx:] = 0, 0, 0, 0  # 縁の影は絵柄ではない
+    # 小さなゴミを除く
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    keep = np.zeros_like(mask)
+    for i in range(1, n):
+        bw, bh = stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
+        if stats[i, cv2.CC_STAT_AREA] < max(6, h * w * 0.0008):
+            continue
+        if (bw <= max(3, w * 0.05) and bh >= h * 0.4) or (bh <= max(3, h * 0.04) and bw >= w * 0.4):
+            continue  # 隣の牌との境目の細長い線
+        keep[lab == i] = 255
+    return keep
+
+
+def _rotate(img: np.ndarray, angle: float, fill) -> np.ndarray:
+    h, w = img.shape[:2]
+    m = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+    flags = cv2.INTER_LINEAR if img.ndim == 3 else cv2.INTER_NEAREST
+    return cv2.warpAffine(img, m, (w, h), flags=flags, borderMode=cv2.BORDER_CONSTANT, borderValue=fill)
+
+
+def tidy_face(face: np.ndarray) -> tuple[np.ndarray, float]:
+    """画面表示用に、牌の絵柄をまっすぐ（水平・垂直）にして、上下左右の真ん中に置き直す。
+
+    写真の牌は1枚ずつ少し傾いているので、絵柄の縦横の線がそろう角度を探して回し、
+    絵柄の範囲が牌の中央に来るよう、牌の地の色で余白を付けて切り出す。
+    戻り値は (整えた画像, 補正した角度)。
+    """
+    gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+    bg_gray = float(np.percentile(gray, 70))
+    bright = gray >= np.percentile(gray, 60)
+    bg = tuple(int(c) for c in np.median(face[bright], axis=0))
+    ink = _ink_mask(face, bg_gray)
+    if ink.sum() < 255 * 20:  # 白など絵柄の無い牌
+        return face, 0.0
+    best, best_score = 0.0, -1.0
+    for ang in np.arange(-6.0, 6.01, 0.25):
+        r = _rotate(ink, float(ang), 0) > 0
+        score = float((r.sum(axis=0) ** 2).sum() + (r.sum(axis=1) ** 2).sum())
+        if score > best_score:
+            best, best_score = float(ang), score
+    rot = _rotate(face, best, bg)
+    ink = _ink_mask(rot, bg_gray)
+    ys, xs = np.nonzero(ink)
+    cx, cy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
+    ink_w, ink_h = xs.max() - xs.min() + 1, ys.max() - ys.min() + 1
+    # 絵柄の周りに上下左右とも余白が残るよう、必要なら牌を少し大きめに取る
+    h = int(round(max(face.shape[0], ink_h / 0.84, ink_w / 0.86 / 0.75)))
+    w = int(round(h * 0.75))
+    canvas = np.full((h, w, 3), bg, np.uint8)
+    x0, y0 = int(round(cx - w / 2)), int(round(cy - h / 2))
+    sx0, sy0 = max(0, x0), max(0, y0)
+    sx1, sy1 = min(rot.shape[1], x0 + w), min(rot.shape[0], y0 + h)
+    canvas[sy0 - y0:sy1 - y0, sx0 - x0:sx1 - x0] = rot[sy0:sy1, sx0:sx1]
+    # 端に残った隣の牌の影・境目を、牌の地の色でなじませる
+    edge = max(2, int(w * 0.05))
+    g = cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    for sl in (np.s_[:, :edge], np.s_[:, -edge:], np.s_[:edge, :], np.s_[-edge:, :]):
+        part = canvas[sl]
+        dark = g[sl] < bg_gray - 25
+        part[dark] = bg
+    return canvas, best
+
+
 def export_ui(tiles: list[tuple[str, np.ndarray]], out_dir: Path) -> None:
-    """画面表示用に、牌の種類ごとに一番くっきり写った1枚を WebP（72x96）で書き出す。"""
+    """画面表示用に、牌の種類ごとに1枚を選び、まっすぐ・中央にそろえて WebP（72x96）で書き出す。
+
+    同じ牌の写り（ふつう4枚）のうち、くっきりしていて傾きの少ないものを選ぶ。
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     best: dict[str, tuple[float, np.ndarray]] = {}
     for label, im in tiles:
-        face = im
-        sharp = cv2.Laplacian(cv2.cvtColor(face, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
-        if label not in best or sharp > best[label][0]:
-            best[label] = (sharp, face)
+        face, ang = tidy_face(im)
+        sharp = cv2.Laplacian(cv2.cvtColor(im, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
+        score = sharp * (1.0 - min(abs(ang), 6.0) / 8.0)
+        if label not in best or score > best[label][0]:
+            best[label] = (score, face)
     for label, (_, face) in best.items():
         face = cv2.resize(face, (72, 96), interpolation=cv2.INTER_AREA)
-        cv2.imwrite(str(out_dir / f"{label}.webp"), face, [cv2.IMWRITE_WEBP_QUALITY, 88])
+        cv2.imwrite(str(out_dir / f"{label}.webp"), face, [cv2.IMWRITE_WEBP_QUALITY, 90])
     print(f"画面表示用の牌画像を {len(best)} 種類書き出しました: {out_dir}")
 
 

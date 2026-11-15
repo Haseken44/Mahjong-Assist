@@ -51,7 +51,7 @@ function tileEl(t, opts = {}) {
   el.append(n, s);
   // 実物の牌の写真（app/static/tiles/）。読めなければ文字表示のまま。
   const img = document.createElement("img");
-  img.src = `/static/tiles/${t}.webp?v=3`;
+  img.src = `/static/tiles/${t}.webp?v=4`;
   img.alt = "";
   img.draggable = false;
   img.decoding = "async";
