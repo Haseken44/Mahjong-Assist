@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from mahjong.constants import EAST, NORTH, SOUTH, WEST
 from mahjong.hand_calculating.hand import HandCalculator
 from mahjong.hand_calculating.hand_config import HandConfig, OptionalRules
+from mahjong.hand_calculating.scores import ScoresCalculator
 
 from . import tiles as T
 from .settings import RoundSettings
@@ -45,6 +46,7 @@ ERROR_JA = {
 }
 
 _calculator = HandCalculator()
+_scores = ScoresCalculator()
 _rules = OptionalRules(has_aka_dora=True, has_open_tanyao=True)
 
 
@@ -77,14 +79,43 @@ def _config(s: RoundSettings) -> HandConfig:
     )
 
 
-def _payment_text(cost: dict, s: RoundSettings) -> str:
+def _ceil100(x: float) -> int:
+    return int(-(-x // 100) * 100)
+
+
+def _payments(cost: dict, s: RoundSettings) -> tuple[int, str]:
+    """(アガった人が受け取る合計, 支払いの説明) を返す。三麻のツモ損/折半に対応。"""
+    kyoutaku = s.kyoutaku * 1000
+    dealer_pay = cost["main"] + cost["main_bonus"]
+    child_pay = cost["additional"] + cost["additional_bonus"]
     if not s.is_tsumo:
-        return f"ロン {cost['main'] + cost['main_bonus']}点"
+        return dealer_pay + kyoutaku, f"ロン {dealer_pay}点"
+
+    if s.players == 4:
+        if s.is_dealer:
+            return dealer_pay * 3 + kyoutaku, f"ツモ {dealer_pay}点オール"
+        return dealer_pay + child_pay * 2 + kyoutaku, f"ツモ 子{child_pay}点 / 親{dealer_pay}点"
+
+    # 三人麻雀：支払うのは2人だけ
+    if s.tsumo_son:
+        if s.is_dealer:
+            return dealer_pay * 2 + kyoutaku, f"ツモ {dealer_pay}点オール（2人から・ツモ損あり）"
+        return dealer_pay + child_pay + kyoutaku, f"ツモ 子{child_pay}点 / 親{dealer_pay}点（ツモ損あり）"
+    # ツモ損なし：いない北家の分を2人で折半する
     if s.is_dealer:
-        return f"ツモ {cost['main'] + cost['main_bonus']}点オール"
-    child = cost["additional"] + cost["additional_bonus"]
-    dealer = cost["main"] + cost["main_bonus"]
-    return f"ツモ 子{child}点 / 親{dealer}点"
+        each = cost["main"] + _ceil100(cost["main"] / 2) + cost["main_bonus"]
+        return each * 2 + kyoutaku, f"ツモ {each}点オール（2人から・北家分折半）"
+    half = _ceil100(cost["additional"] / 2)
+    d = cost["main"] + half + cost["main_bonus"]
+    c = cost["additional"] + half + cost["additional_bonus"]
+    return d + c + kyoutaku, f"ツモ 子{c}点 / 親{d}点（北家分折半）"
+
+
+def _lib_indicator(indicator: str, s: RoundSettings) -> int:
+    """ライブラリは四人麻雀の「次の牌」でドラを決めるので、三麻の 1m→9m だけ 8m として渡す。"""
+    if s.is_sanma and T.normalize(indicator) == "1m":
+        indicator = "8m"
+    return T.to_34(indicator) * 4 + 1
 
 
 def score_hand(hand: list[str], settings: RoundSettings, win_tile: str | None = None) -> ScoreResult:
@@ -92,15 +123,20 @@ def score_hand(hand: list[str], settings: RoundSettings, win_tile: str | None = 
     if len(hand) != 14:
         return ScoreResult(ok=False, error="点数計算には14枚の手牌が必要です")
     T.check_counts(hand + settings.dora_indicators)
+    if settings.is_sanma:
+        bad = [t for t in hand if t in T.SANMA_EXCLUDED]
+        if bad:
+            return ScoreResult(ok=False, error=f"三人麻雀では萬子の2〜8は使いません: {', '.join(bad)}")
     win = win_tile or settings.win_tile or hand[-1]
     if T.normalize(win) not in [T.normalize(t) for t in hand]:
         return ScoreResult(ok=False, error=ERROR_JA["winning_tile_not_in_hand"], win_tile=win)
 
     hand_136 = T.to_136_array(hand)
     win_136 = T.tile_to_136(win, hand_136)
-    dora_136 = [T.to_34(t) * 4 + 1 for t in settings.dora_indicators]
+    dora_136 = [_lib_indicator(t, settings) for t in settings.dora_indicators]
 
-    r = _calculator.estimate_hand_value(hand_136, win_136, dora_indicators=dora_136 or None, config=_config(settings))
+    config = _config(settings)
+    r = _calculator.estimate_hand_value(hand_136, win_136, dora_indicators=dora_136 or None, config=config)
     if r.error:
         return ScoreResult(ok=False, error=ERROR_JA.get(r.error, r.error), win_tile=win)
 
@@ -108,15 +144,23 @@ def score_hand(hand: list[str], settings: RoundSettings, win_tile: str | None = 
         {"name": YAKU_JA.get(y.yaku_id, y.name), "han": y.han_closed, "yakuman": bool(y.is_yakuman)}
         for y in r.yaku
     ]
-    level = LEVEL_JA.get(r.cost.get("yaku_level", ""), r.cost.get("yaku_level", ""))
+    han, cost = r.han, r.cost
+    is_yakuman = any(y["yakuman"] for y in yaku)
+    if settings.is_sanma and settings.nukidora and not is_yakuman:
+        # 抜きドラ（北）は1枚につきドラ1。役ではないので、役がある場合だけ加算する
+        han += settings.nukidora
+        yaku.append({"name": "抜きドラ（北）", "han": settings.nukidora, "yakuman": False})
+        cost = _scores.calculate_scores(han, r.fu, config)
+
+    total, payment = _payments(cost, settings)
+    level = LEVEL_JA.get(cost.get("yaku_level", ""), cost.get("yaku_level", ""))
     return ScoreResult(
         ok=True,
-        han=r.han,
+        han=han,
         fu=r.fu,
         yaku=yaku,
-        total=r.cost["total"],
-        payment=_payment_text(r.cost, settings),
+        total=total,
+        payment=payment,
         level=level,
         win_tile=win,
     )
-

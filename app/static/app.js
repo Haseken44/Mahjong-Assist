@@ -57,7 +57,11 @@ function tilesInline(tiles) {
 // ---------- 設定 ----------
 function readSettings() {
   const winTile = state.winTile != null && state.hand[state.winTile] ? state.hand[state.winTile] : null;
+  const players = playersValue();
   return {
+    players,
+    nukidora: players === 3 ? Math.max(0, Math.min(4, parseInt($("nukidora").value, 10) || 0)) : 0,
+    tsumo_son: $("tsumoSon").checked,
     seat_wind: $("seatWind").value,
     round_wind: $("roundWind").value,
     honba: Math.max(0, Math.min(20, parseInt($("honba").value, 10) || 0)),
@@ -68,17 +72,40 @@ function readSettings() {
     win_tile: winTile,
   };
 }
-const SETTING_IDS = ["seatWind", "roundWind", "honba", "riichi", "tsumo", "ippatsu"];
+const SETTING_IDS = ["seatWind", "roundWind", "honba", "riichi", "tsumo", "ippatsu", "nukidora", "tsumoSon"];
+const SANMA_EXCLUDED = new Set(["2m", "3m", "4m", "5m", "6m", "7m", "8m", "0m"]);
+
+function playersValue() {
+  const el = document.querySelector("input[name=players]:checked");
+  return el && el.value === "3" ? 3 : 4;
+}
+
+// 四人／三人の切り替え：三麻では萬子2〜8と北家を使わない
+function applyPlayers() {
+  const sanma = playersValue() === 3;
+  document.querySelectorAll(".sanma-only").forEach((el) => (el.hidden = !sanma));
+  document.querySelectorAll("#palette .tile").forEach((el) => (el.hidden = sanma && SANMA_EXCLUDED.has(el.dataset.tile)));
+  const north = $("seatWind").querySelector("option[value=north]");
+  north.hidden = sanma;
+  north.disabled = sanma;
+  if (sanma && $("seatWind").value === "north") $("seatWind").value = "west";
+  if (sanma) {
+    state.hand = state.hand.filter((t) => !SANMA_EXCLUDED.has(t));
+    state.dora = state.dora.filter((t) => !SANMA_EXCLUDED.has(t));
+  }
+}
 function saveSettings() {
   try {
     const v = {};
     SETTING_IDS.forEach((id) => (v[id] = $(id).type === "checkbox" ? $(id).checked : $(id).value));
+    v.players = playersValue();
     localStorage.setItem("mj-settings", JSON.stringify(v));
   } catch (_) { /* 保存できなくても動作に影響なし */ }
 }
 function loadSettings() {
   try {
     const v = JSON.parse(localStorage.getItem("mj-settings") || "{}");
+    if (v.players === 3) document.querySelector("input[name=players][value='3']").checked = true;
     SETTING_IDS.forEach((id) => {
       if (!(id in v)) return;
       if ($(id).type === "checkbox") $(id).checked = !!v[id]; else $(id).value = v[id];
@@ -120,6 +147,7 @@ function countOf(t) {
 
 function addTile(t) {
   const target = document.querySelector("input[name=target]:checked").value;
+  if (playersValue() === 3 && SANMA_EXCLUDED.has(t)) return flash("三人麻雀では萬子の2〜8は使いません");
   if (countOf(t) >= 4) return flash("その牌はもう4枚使っています");
   if (t[0] === "0" && [...state.hand, ...state.dora].includes(t)) return flash("赤五は各色1枚までです");
   if (target === "hand" && state.selected != null) {
@@ -147,6 +175,7 @@ function buildPalette() {
   tiles.push("0m", "0p", "0s");
   tiles.forEach((t) => {
     const el = tileEl(t, { button: true });
+    el.dataset.tile = t;
     el.addEventListener("click", () => addTile(t));
     p.append(el);
   });
@@ -457,6 +486,7 @@ function setManual(v) {
 function init() {
   loadSettings();
   buildPalette();
+  applyPlayers();
   renderHand();
   connect();
   $("cameraBtn").addEventListener("click", toggleCamera);
@@ -477,8 +507,14 @@ function init() {
     state.hand = []; state.dora = []; state.selected = null; state.winTile = null; changed();
   });
   $("demoBtn").addEventListener("click", () => {
-    state.hand = ["2m", "3m", "4m", "0p", "6p", "7p", "3s", "4s", "6s", "7s", "8s", "5z", "5z", "1z"];
-    state.dora = ["1m"]; state.selected = null; state.winTile = null;
+    if (playersValue() === 3) {
+      state.hand = ["1m", "1m", "0p", "6p", "7p", "2p", "3p", "4p", "3s", "4s", "6s", "7s", "8s", "4z"];
+      state.dora = ["1m"];
+    } else {
+      state.hand = ["2m", "3m", "4m", "0p", "6p", "7p", "3s", "4s", "6s", "7s", "8s", "5z", "5z", "1z"];
+      state.dora = ["1m"];
+    }
+    state.selected = null; state.winTile = null;
     setManual(true); changed();
   });
   $("removeTileBtn").addEventListener("click", () => {
@@ -497,6 +533,8 @@ function init() {
     changed();
   });
   SETTING_IDS.forEach((id) => $(id).addEventListener("change", changed));
+  document.querySelectorAll("input[name=players]").forEach((el) =>
+    el.addEventListener("change", () => { applyPlayers(); changed(); }));
   window.addEventListener("resize", () => drawBoxes([]));
 }
 init();

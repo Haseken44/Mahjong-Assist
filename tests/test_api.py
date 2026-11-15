@@ -128,3 +128,27 @@ def test_sort_left_to_right_keeps_main_row():
     dets.append(Detection("1z", 0.9, (0.5, 0.05, 0.56, 0.15)))  # 上の方にある別の牌
     out = sort_left_to_right(list(reversed(dets)))
     assert [d.tile for d in out] == ["1m", "2m", "3m", "4m", "5m"]
+
+
+def test_hand_is_never_shared_between_players():
+    """他のプレイヤーの手牌・分析・映像は、別の接続にも API にも出てこない。"""
+    import re
+
+    from app.main import detector
+
+    a_hand = "1p 2p 3p 4p 5p 6p".split()
+    with client.websocket_connect("/ws") as a, client.websocket_connect("/ws") as b:
+        a.receive_json(); b.receive_json()
+        a.send_bytes(_jpeg(table_image(a_hand)))
+        a.receive_json()
+        a.send_json({"type": "teach", "tiles": a_hand})
+        assert a.receive_json()["type"] == "taught"
+        # B は自分の映像（何も映っていない）を送るだけ。A の手牌は届かない
+        b.send_bytes(_jpeg(np.full((240, 320, 3), 60, np.uint8)))
+        msg = b.receive_json()
+        assert msg["hand"] is None and msg["seen"] == 0
+    info = client.get("/api/info").json()
+    assert "registered" not in info
+    # 見本のファイル名は乱数だけ（時刻や並び順を含まない）
+    for f in detector.store.root.rglob("*.png"):
+        assert re.fullmatch(r"[0-9a-f]{32}\.png", f.name)

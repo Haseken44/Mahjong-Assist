@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from collections import Counter, deque
 from pathlib import Path
 
@@ -55,8 +56,8 @@ async def healthz() -> dict:
 
 @app.get("/api/info")
 async def info() -> dict:
-    store = getattr(detector, "store", None)
-    return {**_hello(), "registered": store.summary() if store else None}
+    # 牌ごとの登録数は返さない（誰かが学習した直後の増え方から手牌を推測されないように）
+    return _hello()
 
 
 @app.post("/api/analyze")
@@ -89,7 +90,11 @@ class Stabilizer:
 
 
 class PlayerSession:
-    """1台のスマホ（1人のプレイヤー）ごとの状態。4人が同時に使っても互いに影響しない。"""
+    """1台のスマホ（1人のプレイヤー）ごとの状態。4人が同時に使っても互いに影響しない。
+
+    手牌・分析結果・カメラ映像はこの接続の中だけに保持し、他の接続へ送ることはない。
+    映像はディスクに保存せず、メモリ上の直近1フレームだけを持つ（切断で破棄）。
+    """
 
     def __init__(self) -> None:
         self.settings = RoundSettings()
@@ -142,8 +147,11 @@ def _teach(sess: PlayerSession, tiles: list[str]) -> dict:
     boxes = find_tiles(sess.last_frame)
     if len(boxes) != len(tiles):
         return {"type": "error", "message": f"枚数が合いません（映っている牌 {len(boxes)}枚 / 入力 {len(tiles)}枚）。牌を横一列に並べて映し直してください"}
-    for t, b in zip(tiles, boxes):
+    pairs = list(zip(tiles, boxes))
+    random.shuffle(pairs)  # 保存順から並び（手牌）を復元できないようにする
+    for t, b in pairs:
         store.add(t, crop(sess.last_frame, b))
+    sess.last_frame = None  # 映像はメモリ上の直近1枚だけ。学習後は捨てる
     sess.stab = Stabilizer()
     return {"type": "taught", "count": len(tiles), "kinds": store.kinds, "templates": store.count}
 
@@ -210,6 +218,9 @@ async def ws(websocket: WebSocket) -> None:
                 await websocket.send_json(result)
     except WebSocketDisconnect:
         pass
+    finally:
+        sess.last_frame = None
+        sess.stab = Stabilizer()
 
 
 def _hello() -> dict:

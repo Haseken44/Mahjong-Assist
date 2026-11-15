@@ -97,3 +97,70 @@ def test_hints_tanyao_and_yakuhai():
 def test_wrong_tile_count_message():
     a = analyze(h("1m 2m 3m 4m 5m 6m"), RoundSettings())
     assert "13枚か14枚" in a["message"]
+
+
+# ---------- 三人麻雀（さんま） ----------
+
+def S3(**kw) -> RoundSettings:
+    return RoundSettings(players=3, **kw)
+
+
+def test_sanma_dora_indicator_wraps_1m_to_9m():
+    assert T.sanma_dora_from_indicator("1m") == "9m"
+    assert T.sanma_dora_from_indicator("9m") == "1m"
+    assert T.sanma_dora_from_indicator("4z") == "1z"
+    assert T.sanma_dora_from_indicator("7z") == "5z"
+    hand = h("9m 9m 9m 1p 2p 3p 4p 5p 6p 7s 8s 9s 2s 2s")
+    r = score_hand(hand, S3(seat_wind="south", is_riichi=True, dora_indicators=["1m"]))
+    assert r.ok
+    dora = next(y for y in r.yaku if y["name"] == "ドラ")
+    assert dora["han"] == 3  # 九萬3枚
+
+
+def test_sanma_rejects_2m_to_8m():
+    with pytest.raises(T.TileError):
+        analyze(h("1m 2m 3m 1p 2p 3p 4p 5p 6p 7s 8s 9s 2s"), S3())
+    with pytest.raises(ValueError):
+        S3(seat_wind="north")
+
+
+def test_sanma_effective_tiles_exclude_manzu_middle():
+    a = analyze(h("1m 9m 1p 2p 3p 4p 5p 6p 7s 8s 9s 2s 2s"), S3())
+    tiles = {e["tile"] for e in a["effective"]}
+    assert not tiles & T.SANMA_EXCLUDED
+
+
+def test_sanma_nukidora_adds_han():
+    hand = h("1p 2p 3p 4p 5p 6p 7p 8p 9p 2s 3s 4s 5s 5s")
+    base = score_hand(hand, S3(seat_wind="south", is_riichi=True))
+    nuki = score_hand(hand, S3(seat_wind="south", is_riichi=True, nukidora=2))
+    assert nuki.han == base.han + 2
+    assert any(y["name"].startswith("抜きドラ") for y in nuki.yaku)
+    assert nuki.total > base.total
+
+
+def test_sanma_nukidora_alone_is_not_yaku():
+    r = score_hand(h("1p 2p 3p 4p 5p 6p 7s 8s 9s 9m 9m 9m 1z 1z"), S3(seat_wind="south", nukidora=1), win_tile="1z")
+    assert not r.ok
+
+
+def test_sanma_tsumo_son_vs_split():
+    hand = h("1p 2p 3p 4p 5p 6p 7p 8p 9p 2s 3s 4s 5s 5s")
+    # 子のツモ：ツモ損ありは2人分だけ、折半なら北家分も2人で払う
+    son = score_hand(hand, S3(seat_wind="south", is_riichi=True, is_tsumo=True))
+    split = score_hand(hand, S3(seat_wind="south", is_riichi=True, is_tsumo=True, tsumo_son=False))
+    four = score_hand(hand, RoundSettings(seat_wind="south", is_riichi=True, is_tsumo=True))
+    assert son.total < four.total
+    assert split.total >= four.total
+    assert "ツモ損" in son.payment and "折半" in split.payment
+    # 親のツモ
+    d = score_hand(hand, S3(seat_wind="east", is_riichi=True, is_tsumo=True))
+    d4 = score_hand(hand, RoundSettings(seat_wind="east", is_riichi=True, is_tsumo=True))
+    assert d.total * 3 == d4.total * 2
+
+
+def test_sanma_hints():
+    a = analyze(h("1p 2p 3p 4p 5p 6p 7p 8p 2s 3s 4z 4z 9m"), S3(seat_wind="south"))
+    names = [x["name"] for x in a["hints"]]
+    assert "抜きドラ（北）" in names
+    assert "三色同順（サンショク）" not in names

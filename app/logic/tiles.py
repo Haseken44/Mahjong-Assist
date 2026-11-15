@@ -108,6 +108,30 @@ def tile_to_136(tile: str, hand_136: list[int]) -> int:
     raise TileError(f"アガリ牌 {tile} が手牌にありません")
 
 
+# 三人麻雀では萬子の2〜8（赤五萬を含む）を使わない
+SANMA_EXCLUDED = {f"{n}m" for n in range(2, 9)} | {"0m"}
+
+
+def tile_set(players: int) -> list[str]:
+    """使う牌の種類（34種 or 三麻の27種）。"""
+    return [t for t in ALL_TILES if players == 4 or t not in SANMA_EXCLUDED]
+
+
+def sanma_dora_from_indicator(indicator: str) -> str:
+    """三麻のドラ表示牌 → ドラ。萬子は 1m→9m→1m と1と9だけで回る。"""
+    t = normalize(indicator)
+    if t == "1m":
+        return "9m"
+    if t == "9m":
+        return "1m"
+    n, s = int(t[0]), t[1]
+    if s == "z":
+        if n <= 4:
+            return f"{n % 4 + 1}z"
+        return f"{(n - 5 + 1) % 3 + 5}z"
+    return f"{n % 9 + 1}{s}"
+
+
 def sort_tiles(tiles: Iterable[str]) -> list[str]:
     return sorted(tiles, key=lambda t: (to_34(t), 0 if is_red(t) else 1))
 

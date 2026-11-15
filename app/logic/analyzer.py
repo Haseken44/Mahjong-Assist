@@ -30,11 +30,16 @@ def _remaining(index: int, hand34: list[int], visible34: list[int]) -> int:
     return max(4 - hand34[index] - visible34[index], 0)
 
 
-def effective_tiles(hand34: list[int], visible34: list[int]) -> tuple[int, list[dict]]:
-    """13枚（または 3n+1 枚）の手牌に対する向聴数と有効牌（受け入れ）。"""
+_SANMA_SKIP = {T.to_34(t) for t in T.SANMA_EXCLUDED}
+
+
+def effective_tiles(hand34: list[int], visible34: list[int], players: int = 4) -> tuple[int, list[dict]]:
+    """13枚（または 3n+1 枚）の手牌に対する向聴数と有効牌（受け入れ）。三麻では萬子2〜8を除く。"""
     base = shanten_of(hand34)
     result = []
     for i in range(34):
+        if players == 3 and i in _SANMA_SKIP:
+            continue
         if hand34[i] >= 4:
             continue
         remaining = _remaining(i, hand34, visible34)
@@ -87,7 +92,7 @@ def discard_options(hand: list[str], settings: RoundSettings) -> list[dict]:
         seen.add(tile)
         rest = hand[:i] + hand[i + 1:]
         arr = T.to_34_array(rest)
-        sh, eff = effective_tiles(arr, visible)
+        sh, eff = effective_tiles(arr, visible, settings.players)
         options.append({
             "discard": tile,
             "shanten": sh,
@@ -135,9 +140,16 @@ def yaku_hints(hand: list[str], settings: RoundSettings) -> list[dict]:
         elif arr[idx] == 2:
             add(f"役牌 {tile_name}", 1, f"{tile_name}（{names}）があと1枚で役。出たらポンしてもOK", han)
 
+    sanma = settings.is_sanma
+    suits = (("p", "筒子"), ("s", "索子")) if sanma else (("m", "萬子"), ("p", "筒子"), ("s", "索子"))
+
+    # 抜きドラ（三麻）
+    if sanma and arr[30] > 0:
+        add("抜きドラ（北）", 0, f"北を{arr[30]}枚持っています。「北」と言って抜くとドラ1になり、代わりの牌を引けます（抜いたら設定の抜きドラを増やす）", "ドラ1/枚")
+
     # 混一色・清一色
     honors = sum(arr[27:])
-    for s, name in (("m", "萬子"), ("p", "筒子"), ("s", "索子")):
+    for s, name in suits:
         off = T.SUIT_OFFSET[s]
         cnt = sum(arr[off:off + 9])
         others = n - cnt - honors
@@ -157,7 +169,7 @@ def yaku_hints(hand: list[str], settings: RoundSettings) -> list[dict]:
         add("対々和（トイトイ）", 4 - trip, f"刻子が{trip}組。対子をポンして刻子4組を目指す", "2翻")
 
     # 一気通貫
-    for s, name in (("m", "萬子"), ("p", "筒子"), ("s", "索子")):
+    for s, name in suits:
         off = T.SUIT_OFFSET[s]
         missing = sum(1 for k in range(9) if arr[off + k] == 0)
         if missing <= 3:
@@ -165,7 +177,7 @@ def yaku_hints(hand: list[str], settings: RoundSettings) -> list[dict]:
 
     # 三色同順
     best = None
-    for start in range(7):
+    for start in range(0 if sanma else 7):  # 三麻は萬子の2〜8が無いので三色同順はできない
         missing = sum(1 for s in (0, 9, 18) for k in range(3) if arr[s + start + k] == 0)
         if best is None or missing < best[0]:
             best = (missing, start)
@@ -187,6 +199,10 @@ def analyze(hand: list[str], settings: RoundSettings) -> dict:
     hand = [T.validate(t) for t in hand]
     T.check_counts(hand + settings.dora_indicators)
     n = len(hand)
+    if settings.is_sanma:
+        bad = [t for t in hand if t in T.SANMA_EXCLUDED]
+        if bad:
+            raise T.TileError(f"三人麻雀では萬子の2〜8は使いません（{'・'.join(T.display_name(t) for t in bad)}）。読み違いなら直してください")
     result: dict = {
         "tiles": hand,
         "sorted": T.sort_tiles(hand),
@@ -203,7 +219,7 @@ def analyze(hand: list[str], settings: RoundSettings) -> dict:
     result["hints"] = yaku_hints(hand, settings)
 
     if n % 3 == 1:
-        sh, eff = effective_tiles(T.to_34_array(hand), _visible(settings))
+        sh, eff = effective_tiles(T.to_34_array(hand), _visible(settings), settings.players)
         result.update(shanten=sh, shanten_label=shanten_label(sh), effective=eff,
                       ukeire=sum(e["remaining"] for e in eff))
         if sh == 0:
@@ -221,7 +237,11 @@ def analyze(hand: list[str], settings: RoundSettings) -> dict:
         result["discards"] = options
         if sh != -1 and options:
             best = options[0]
-            result["message"] = f"おすすめは「{T.display_name(best['discard'])}」切り（{shanten_label(best['shanten'])}・受け入れ{best['ukeire']}枚）"
+            if settings.is_sanma and "4z" in hand:
+                # 三麻の北は切るより抜く方が得（ドラ1＋もう1枚引ける）
+                result["message"] = "「北」は捨てずに抜きドラにしましょう（「北」と言って脇に出し、1枚引く）。抜いたら設定の抜きドラを1つ増やしてください"
+            else:
+                result["message"] = f"おすすめは「{T.display_name(best['discard'])}」切り（{shanten_label(best['shanten'])}・受け入れ{best['ukeire']}枚）"
     else:
         result["message"] = f"牌が{n}枚です。13枚か14枚にしてください（鳴きは未対応）"
     return result
