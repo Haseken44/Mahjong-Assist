@@ -34,7 +34,7 @@ log = logging.getLogger("mahjong-assist")
 STATIC = Path(__file__).parent / "static"
 MAX_FRAME_BYTES = 3 * 1024 * 1024
 
-app = FastAPI(title="Mahjong Vision Assist", version="0.1.0")
+app = FastAPI(title="Mahjong Vision Assist", version="0.3.0")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 detector = load_detector()
 
@@ -51,7 +51,7 @@ async def index() -> FileResponse:
 
 @app.get("/healthz")
 async def healthz() -> dict:
-    return {"status": "ok", "detector": detector.mode}
+    return {"status": "ok", "version": app.version, "detector": detector.mode}
 
 
 @app.get("/api/rules")
