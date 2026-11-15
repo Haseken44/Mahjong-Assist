@@ -180,3 +180,7 @@ button.ok { background: var(--accent); color: #fff; border-color: transparent; f
 .special summary { cursor: pointer; font-weight: 600; }
 .special label.check small { display: block; color: var(--muted); font-size: .72rem; font-weight: normal; }
 .special label.check { align-items: flex-start !important; }
+.other-pay { margin: 4px 0 6px; padding: 6px 8px; border-radius: 8px; background: var(--line); font-size: .85rem; }
+.other-pay ul { list-style: none; padding: 0; margin: 2px 0 0; font-weight: 600; }
+.dealer-switch { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.dealer-switch button { min-height: 38px; padding: 6px 12px; }

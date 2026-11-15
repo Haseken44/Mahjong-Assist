@@ -478,6 +478,23 @@ function waitItem(w) {
   return li([tilesInline([w.tile]), body, pts]);
 }
 
+// 親・子を入れ替えた場合の点数を、参考としてカードに足す
+function addOtherPay(card, o, kind) {
+  if (!o || !o.ok) return;
+  const ref = document.createElement("div");
+  ref.className = "other-pay";
+  const who = o.dealer ? "親" : "子";
+  ref.append(span(`参考：${who}の${kind}なら ${o.total.toLocaleString()}点`, "meta"));
+  const ul = document.createElement("ul");
+  (o.pays || []).forEach((p) => {
+    const l = document.createElement("li");
+    l.textContent = `${p.who} ${p.points.toLocaleString()}点`;
+    ul.append(l);
+  });
+  ref.append(ul);
+  card.insertBefore(ref, card.querySelector(".hanfu"));
+}
+
 // アガリ形の点数（ロン・ツモの片方）を1枚のカードにする
 function scoreCard(r, title, selected) {
   const box = document.createElement("div");
@@ -540,8 +557,28 @@ function renderAnalysis(a) {
   if (a.scores) {
     const wrap = document.createElement("div");
     wrap.className = "score-pair";
-    wrap.append(scoreCard(a.scores.ron, "ロンなら（捨て牌でアガリ）", a.scores.selected === "ron"),
-      scoreCard(a.scores.tsumo, "ツモなら（自分で引いてアガリ）", a.scores.selected === "tsumo"));
+    const me = a.scores.dealer ? "親" : "子";
+    // 親か子かで点数が変わる（親は子の1.5倍）。ここで切り替えられるようにする
+    const sw = document.createElement("div");
+    sw.className = "dealer-switch";
+    sw.append(span("あなたは", "meta"));
+    [["親", "east"], ["子", "south"]].forEach(([label, wind]) => {
+      const b = document.createElement("button");
+      b.textContent = label === "親" ? "親（東）" : "子（南・西・北）";
+      b.setAttribute("aria-pressed", String(label === me));
+      b.addEventListener("click", () => {
+        if (label === me) return;
+        $("seatWind").value = wind;
+        changed();
+      });
+      sw.append(b);
+    });
+    $("score").append(sw);
+    const ronCard = scoreCard(a.scores.ron, `ロンなら（${me}のロン）`, a.scores.selected === "ron");
+    const tsumoCard = scoreCard(a.scores.tsumo, `ツモなら（${me}のツモ）`, a.scores.selected === "tsumo");
+    addOtherPay(ronCard, a.scores.ron_other, "ロン");
+    addOtherPay(tsumoCard, a.scores.tsumo_other, "ツモ");
+    wrap.append(ronCard, tsumoCard);
     $("score").append(wrap);
   } else if (a.score) {
     $("score").append(scoreCard(a.score, a.score.tsumo ? "ツモ" : "ロン", true));
