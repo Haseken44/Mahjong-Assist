@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const HONOR = { 1: "東", 2: "南", 3: "西", 4: "北", 5: "白", 6: "發", 7: "中" };
 const SUIT = { m: "萬", p: "筒", s: "索" };
 const KANJI = "一二三四五六七八九";
-const FRAME_INTERVAL_MS = 450;
+const FRAME_INTERVAL_MS = 350; // 最大でおよそ3フレーム/秒（前の結果が返ってから次を送る）
 const MAX_TILES = 14;
 
 const state = {
@@ -13,8 +13,9 @@ const state = {
   dora: [],
   winTile: null,      // 手牌中のアガリ牌の位置
   selected: null,
-  frozen: false,
+  manual: false,       // true: プレイヤーが手で修正中（自動更新を止める）
   mode: "unknown",
+  kinds: 0,
   ws: null,
   waiting: false,
   stream: null,
@@ -121,14 +122,20 @@ function addTile(t) {
   const target = document.querySelector("input[name=target]:checked").value;
   if (countOf(t) >= 4) return flash("その牌はもう4枚使っています");
   if (t[0] === "0" && [...state.hand, ...state.dora].includes(t)) return flash("赤五は各色1枚までです");
+  if (target === "hand" && state.selected != null) {
+    state.hand[state.selected] = t; // 選んだ牌を置き換える（認識の修正）
+    state.selected = null;
+    setManual(true);
+    return changed();
+  }
   if (target === "dora") {
     if (state.dora.length >= 5) return flash("ドラ表示牌は5枚までです");
     state.dora.push(t);
   } else {
     if (state.hand.length >= MAX_TILES) return flash("手牌は14枚までです");
     state.hand.push(t);
+    setManual(true);
   }
-  setFrozen(true);
   changed();
 }
 
@@ -145,10 +152,12 @@ function buildPalette() {
   });
 }
 
-function flash(msg) {
-  $("message").textContent = msg;
-  $("message").classList.add("err");
-  setTimeout(() => $("message").classList.remove("err"), 1500);
+function flash(msg, isError = true) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.className = "toast show" + (isError ? " err" : "");
+  clearTimeout(flash.t);
+  flash.t = setTimeout(() => (el.className = "toast"), 3500);
 }
 
 // ---------- 分析 ----------
@@ -156,8 +165,15 @@ let analyzeTimer = null;
 function changed() {
   renderHand();
   saveSettings();
+  sendSettings();
   clearTimeout(analyzeTimer);
-  analyzeTimer = setTimeout(requestAnalysis, 120);
+  if (state.manual || state.mode === "mock" || !state.stream) analyzeTimer = setTimeout(requestAnalysis, 120);
+}
+
+function sendSettings() {
+  if (state.ws && state.ws.readyState === 1) {
+    state.ws.send(JSON.stringify({ type: "settings", settings: readSettings() }));
+  }
 }
 
 async function requestAnalysis() {
@@ -278,23 +294,33 @@ function renderAnalysis(a) {
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.binaryType = "arraybuffer";
   state.ws = ws;
+  ws.onopen = () => sendSettings();
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (msg.type === "hello") return setMode(msg.mode);
-    if (msg.type === "detection") {
-      state.waiting = false;
-      drawBoxes(msg.detections || []);
-      if (!state.frozen && msg.tiles && msg.tiles.length) {
-        state.hand = msg.tiles.slice(0, MAX_TILES);
-        state.selected = null;
-        state.winTile = null;
-        renderHand();
-        if (msg.analysis) renderAnalysis(msg.analysis);
-      }
-      return;
+    switch (msg.type) {
+      case "hello":
+        setMode(msg.mode, msg.kinds);
+        break;
+      case "detection":
+        state.waiting = false;
+        onDetection(msg);
+        break;
+      case "analysis":
+        if (!state.manual) renderAnalysis(msg.analysis);
+        break;
+      case "taught":
+        state.kinds = msg.kinds;
+        setMode(state.mode, msg.kinds);
+        setManual(false);
+        flash(`${msg.count}枚を覚えました（登録 ${msg.kinds}種類）。自動認識に戻ります`, false);
+        break;
+      case "error":
+        state.waiting = false;
+        flash(msg.message);
+        break;
     }
-    if (msg.type === "error") { state.waiting = false; flash(msg.message); }
   };
   ws.onclose = () => {
     state.waiting = false;
@@ -303,10 +329,32 @@ function connect() {
   };
 }
 
-function setMode(mode) {
+function onDetection(msg) {
+  drawBoxes(msg.detections || []);
+  const status = $("camStatus");
+  if (!msg.seen) status.textContent = "牌が見つかりません。手牌を横一列にして、画面の中央に映してください";
+  else if (msg.unknown) status.textContent = `${msg.seen}枚を検出（判定できない牌 ${msg.unknown}枚）。下で正しい牌に直して「この並びで覚える」を押すと覚えます`;
+  else status.textContent = `${msg.seen}枚を認識中`;
+  if (state.manual) return;
+  if (msg.hand && JSON.stringify(msg.hand) !== JSON.stringify(state.hand)) {
+    // 手牌が変わった（プレイヤーがアシストと違う牌を切った場合も含む）→ 読み直して分析を更新
+    state.hand = msg.hand.slice(0, MAX_TILES);
+    state.selected = null;
+    state.winTile = null;
+    renderHand();
+    if (msg.analysis) renderAnalysis(msg.analysis); else requestAnalysis();
+  } else if (msg.unknown && msg.seen && !state.hand.length) {
+    // まだ何も覚えていない：検出枚数ぶんの空欄を出し、入力を促す
+    $("message").textContent = "この牌の見本がまだありません。映っている牌を左から順に入力して「この並びで覚える」を押してください";
+  }
+}
+
+function setMode(mode, kinds) {
   state.mode = mode;
-  $("mode").textContent = mode === "yolo" ? "AI認識" : "手動入力モード";
-  $("modeNote").hidden = mode === "yolo";
+  state.kinds = kinds || 0;
+  const label = { yolo: "AI認識", template: `自動認識（見本${state.kinds}/37種）`, mock: "手動入力モード" }[mode] || mode;
+  $("mode").textContent = label;
+  $("modeNote").hidden = mode !== "template" || state.kinds >= 37;
 }
 
 // ---------- カメラ ----------
@@ -347,7 +395,7 @@ function stopCamera() {
 function loop(ts) {
   if (!state.stream) return;
   const ready = video.readyState >= 2 && state.ws && state.ws.readyState === 1;
-  if (ready && state.mode === "yolo" && !state.frozen && !state.waiting && ts - state.lastSent > FRAME_INTERVAL_MS) {
+  if (ready && state.mode !== "mock" && !state.waiting && ts - state.lastSent > FRAME_INTERVAL_MS) {
     sendFrame();
     state.lastSent = ts;
   }
@@ -360,9 +408,13 @@ function sendFrame() {
   grab.width = Math.round(w * scale);
   grab.height = Math.round(h * scale);
   grab.getContext("2d").drawImage(video, 0, 0, grab.width, grab.height);
-  const image = grab.toDataURL("image/jpeg", 0.7);
   state.waiting = true;
-  state.ws.send(JSON.stringify({ type: "frame", image, settings: readSettings() }));
+  grab.toBlob((blob) => {
+    if (!blob || !state.ws || state.ws.readyState !== 1) { state.waiting = false; return; }
+    blob.arrayBuffer().then((buf) => state.ws.send(buf));
+  }, "image/jpeg", 0.75);
+  // 応答が来ないまま固まらないよう、一定時間で次のフレームを許可する
+  setTimeout(() => { state.waiting = false; }, 3000);
 }
 
 // object-fit: contain で表示された映像の上に検出枠を描く
@@ -383,9 +435,9 @@ function drawBoxes(dets) {
   dets.forEach((d) => {
     const [x1, y1, x2, y2] = d.box;
     const x = ox + x1 * dw, y = oy + y1 * dh, bw = (x2 - x1) * dw, bh = (y2 - y1) * dh;
-    ctx.strokeStyle = "#39ff88";
+    ctx.strokeStyle = d.tile ? "#39ff88" : "#ffb020";
     ctx.strokeRect(x, y, bw, bh);
-    const label = tileName(d.tile);
+    const label = d.tile ? tileName(d.tile) : "？";
     ctx.fillStyle = "rgba(0,0,0,.65)";
     ctx.fillRect(x, y - 16, ctx.measureText(label).width + 6, 16);
     ctx.fillStyle = "#fff";
@@ -393,10 +445,12 @@ function drawBoxes(dets) {
   });
 }
 
-function setFrozen(v) {
-  state.frozen = v;
-  $("freezeBtn").setAttribute("aria-pressed", String(v));
-  $("freezeBtn").textContent = v ? "固定中（タップで再開）" : "認識を固定";
+// 手で修正中は自動更新を止める。「自動に戻す」で再開
+function setManual(v) {
+  state.manual = v;
+  $("autoBtn").hidden = !v;
+  $("teachBtn").hidden = !(v && state.mode === "template");
+  $("manualBadge").hidden = !v;
 }
 
 // ---------- イベント ----------
@@ -406,7 +460,12 @@ function init() {
   renderHand();
   connect();
   $("cameraBtn").addEventListener("click", toggleCamera);
-  $("freezeBtn").addEventListener("click", () => setFrozen(!state.frozen));
+  $("autoBtn").addEventListener("click", () => { setManual(false); flash("自動認識に戻しました", false); });
+  $("teachBtn").addEventListener("click", () => {
+    if (!state.stream) return flash("カメラを開始して、入力した手牌と同じ並びを映してください");
+    if (!state.hand.length) return flash("映っている牌を左から順に入力してください");
+    state.ws.send(JSON.stringify({ type: "teach", tiles: state.hand }));
+  });
   $("sortBtn").addEventListener("click", () => {
     const win = state.winTile != null ? state.hand[state.winTile] : null;
     state.hand.sort((a, b) => tileOrder(a) - tileOrder(b));
@@ -420,11 +479,12 @@ function init() {
   $("demoBtn").addEventListener("click", () => {
     state.hand = ["2m", "3m", "4m", "0p", "6p", "7p", "3s", "4s", "6s", "7s", "8s", "5z", "5z", "1z"];
     state.dora = ["1m"]; state.selected = null; state.winTile = null;
-    setFrozen(true); changed();
+    setManual(true); changed();
   });
   $("removeTileBtn").addEventListener("click", () => {
     if (state.selected == null) return;
     state.hand.splice(state.selected, 1);
+    setManual(true);
     if (state.winTile === state.selected) state.winTile = null;
     else if (state.winTile != null && state.winTile > state.selected) state.winTile--;
     state.selected = null;

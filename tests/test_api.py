@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.vision.detector import Detection, normalize_label, sort_left_to_right
+from tests.synth import table_image
 
 client = TestClient(app)
 
@@ -31,17 +32,88 @@ def test_api_analyze_bad_tile():
     assert r.status_code in (400, 422)
 
 
-def test_websocket_frame_and_analyze():
+def _jpeg(img) -> bytes:
+    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return buf.tobytes()
+
+
+def test_websocket_legacy_frame_and_analyze():
     img = np.full((240, 320, 3), 200, np.uint8)
-    ok, buf = cv2.imencode(".jpg", img)
-    data = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
+    data = "data:image/jpeg;base64," + base64.b64encode(_jpeg(img)).decode()
     with client.websocket_connect("/ws") as ws:
         assert ws.receive_json()["type"] == "hello"
-        ws.send_json({"type": "frame", "image": data, "settings": {}})
+        ws.send_json({"type": "frame", "image": data})
         msg = ws.receive_json()
-        assert msg["type"] == "detection" and msg["tiles"] == []
-        ws.send_json({"type": "analyze", "tiles": ["1m"] * 3, "settings": {}})
+        assert msg["type"] == "detection" and msg["hand"] is None
+        ws.send_json({"type": "analyze", "tiles": ["1m"] * 3})
         assert ws.receive_json()["type"] == "analysis"
+
+
+def test_stream_teach_then_auto_recognize_and_follow_changes():
+    """映像を流す → 教える → 自動で手牌を読み分析 → 手牌が変わったら分析し直す。"""
+    teach = "1m 2m 3m 0p 6p 7p 3s 4s 6s 7s 8s 5z 5z".split()
+    with client.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["mode"] == "template"
+        ws.send_json({"type": "settings", "settings": {"seat_wind": "south"}})
+        ws.send_bytes(_jpeg(table_image(teach)))
+        first = ws.receive_json()
+        assert first["seen"] == 13 and first["unknown"] == 13
+        ws.send_json({"type": "teach", "tiles": teach})
+        taught = ws.receive_json()
+        assert taught["type"] == "taught" and taught["count"] == 13
+
+        # 3フレーム同じ手牌が読めたら確定して分析が届く
+        frame = _jpeg(table_image(teach, scale=1.1, origin=(40, 200)))
+        msgs = []
+        for _ in range(3):
+            ws.send_bytes(frame)
+            msgs.append(ws.receive_json())
+        assert msgs[-1]["changed"] and msgs[-1]["hand"] == teach
+        assert msgs[-1]["analysis"]["shanten"] == 0
+
+        # プレイヤーがアシストと関係なく牌を入れ替えても、読み直して分析が更新される
+        changed = teach[:-1] + ["3s"]
+        frame2 = _jpeg(table_image(changed, scale=1.1, origin=(40, 200)))
+        for _ in range(3):
+            ws.send_bytes(frame2)
+            last = ws.receive_json()
+        assert last["hand"] == changed and last["changed"]
+
+
+def test_teach_count_mismatch():
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_bytes(_jpeg(table_image(["1m", "2m", "3m"])))
+        ws.receive_json()
+        ws.send_json({"type": "teach", "tiles": ["1m", "2m"]})
+        msg = ws.receive_json()
+        assert msg["type"] == "error" and "枚数" in msg["message"]
+
+
+def test_four_players_are_independent():
+    """4人が同時に接続しても、各自の手牌・設定は混ざらない。"""
+    hands = [
+        "1m 2m 3m".split(), "0p 6p 7p".split(), "3s 4s 6s".split(), "5z 5z 1m".split(),
+    ]
+    conns = [client.websocket_connect("/ws") for _ in range(4)]
+    wss = [c.__enter__() for c in conns]
+    try:
+        for ws in wss:
+            ws.receive_json()
+        for ws, h in zip(wss, hands):
+            ws.send_bytes(_jpeg(table_image(h)))
+            ws.receive_json()
+        for ws, h in zip(wss, hands):
+            ws.send_json({"type": "teach", "tiles": h})
+            assert ws.receive_json()["type"] == "taught"
+        for ws, h in zip(wss, hands):
+            for _ in range(3):
+                ws.send_bytes(_jpeg(table_image(h)))
+                last = ws.receive_json()
+            assert last["hand"] == h
+    finally:
+        for c in conns:
+            c.__exit__(None, None, None)
 
 
 def test_label_normalization():

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f5132">
   <title>麻雀アシスト</title>
-  <link rel="stylesheet" href="/static/style.css?v=1">
+  <link rel="stylesheet" href="/static/style.css?v=2">
 </head>
 <body>
   <header class="topbar">
@@ -22,14 +22,14 @@
       </div>
       <div class="row">
         <button id="cameraBtn" class="primary">カメラ開始</button>
-        <button id="freezeBtn" aria-pressed="false">認識を固定</button>
       </div>
-      <p id="modeNote" class="note" hidden>牌認識モデルが未設置のため、いまは手動入力モードです。下の牌ボタンで手牌を入力してください。</p>
+      <p id="camStatus" class="status">カメラを開始すると、手牌を自動で読み取ってアシストします。</p>
+      <p id="modeNote" class="note" hidden>はじめて使う牌セットは、牌の見た目を覚えさせる必要があります。手牌を映したまま、下で左から順に正しい牌を入力し「この並びで覚える」を押してください。同じ卓の誰かが覚えさせれば全員に反映されます。</p>
     </section>
 
     <section class="card">
       <div class="section-head">
-        <h2>手牌 <small id="count">0枚</small></h2>
+        <h2>手牌 <small id="count">0枚</small> <small id="manualBadge" class="manual" hidden>手で修正中</small></h2>
         <div class="mini-actions">
           <button id="sortBtn">理牌</button>
           <button id="clearBtn">全消去</button>
@@ -40,6 +40,11 @@
       <div id="tileActions" class="row tile-actions" hidden>
         <button id="removeTileBtn">この牌を削除</button>
         <button id="winTileBtn">アガリ牌にする</button>
+      </div>
+      <p class="tip">牌をタップして下の牌ボタンを押すと、その牌を置き換えられます。</p>
+      <div class="row">
+        <button id="teachBtn" class="primary" hidden>この並びで覚える</button>
+        <button id="autoBtn" hidden>自動認識に戻す</button>
       </div>
       <div class="dora-line">ドラ表示牌: <span id="dora" class="tiles small"></span></div>
 
@@ -79,7 +84,8 @@
     </section>
   </main>
 
+  <div id="toast" class="toast" role="status"></div>
   <footer class="foot">鳴き（ポン・チー・カン）は今後対応予定です</footer>
-  <script src="/static/app.js?v=1"></script>
+  <script src="/static/app.js?v=2"></script>
 </body>
 </html>

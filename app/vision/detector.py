@@ -1,7 +1,8 @@
-"""牌の物体検出。
+"""牌の検出と判定。
 
-models/mahjong_best.pt（YOLOv8/YOLO11 の学習済みモデル）と ultralytics があれば YOLO で検出し、
-無ければモックモード（検出なし）で動く。モックモードでは画面から手動で手牌を入力する。
+1. models/mahjong_best.pt（YOLOv8/YOLO11 の学習済みモデル）と ultralytics があれば YOLO で検出する。
+2. 無ければ「切り出し＋見本照合」方式（segmenter.py + templates.py）で動く。
+   見本はプレイヤーが画面から教える（学習ボタン）。見本が無い牌は「？」になる。
 
 モデルのクラス名は「1m」「5p」「7z」「0s(赤五)」形式を推奨。よくある別名（1man, 5pin_red, east 等）も変換する。
 """
@@ -59,7 +60,7 @@ def normalize_label(label: str) -> str | None:
 
 @dataclass
 class Detection:
-    tile: str
+    tile: str | None  # 判定できない牌は None
     confidence: float
     box: tuple[float, float, float, float]  # x1, y1, x2, y2 （0〜1 に正規化）
 
@@ -75,12 +76,34 @@ class BaseDetector:
 
 
 class MockDetector(BaseDetector):
-    """学習済みモデルが無いときのダミー。何も検出しない（手動入力モード）。"""
+    """何も検出しないダミー（テスト・手動入力専用）。"""
 
     mode = "mock"
 
     def detect(self, img: np.ndarray) -> list[Detection]:
         return []
+
+
+class TemplateDetector(BaseDetector):
+    """白い牌の領域を切り出し、登録された見本と照合する。学習済みモデル不要・CPU で軽量。"""
+
+    mode = "template"
+
+    def __init__(self, store=None):
+        from .templates import TemplateStore
+
+        self.store = store or TemplateStore()
+
+    def detect(self, img: np.ndarray) -> list[Detection]:
+        from .segmenter import crop, find_tiles
+
+        h, w = img.shape[:2]
+        out = []
+        for box in find_tiles(img):
+            tile, conf = self.store.classify(crop(img, box))
+            x, y, bw, bh = box
+            out.append(Detection(tile, conf, (x / w, y / h, (x + bw) / w, (y + bh) / h)))
+        return out
 
 
 class YoloDetector(BaseDetector):
@@ -135,15 +158,16 @@ def sort_left_to_right(dets: list[Detection]) -> list[Detection]:
 
 def load_detector() -> BaseDetector:
     path = Path(os.environ.get("MAHJONG_MODEL", DEFAULT_MODEL))
-    if os.environ.get("MAHJONG_DETECTOR", "auto") == "mock":
+    choice = os.environ.get("MAHJONG_DETECTOR", "auto")
+    if choice == "mock":
         return MockDetector()
-    if not path.exists():
-        log.info("モデル %s が無いのでモックモードで起動します", path)
-        return MockDetector()
+    if choice == "template" or not path.exists():
+        log.info("見本照合方式で起動します（YOLO モデル: %s なし）", path)
+        return TemplateDetector()
     try:
         det = YoloDetector(path, conf=float(os.environ.get("MAHJONG_CONF", "0.45")))
         log.info("YOLO モデルを読み込みました: %s", path)
         return det
     except Exception:  # ultralytics 未インストールなど
-        log.exception("YOLO モデルを読み込めないのでモックモードで起動します")
-        return MockDetector()
+        log.exception("YOLO モデルを読み込めないので見本照合方式で起動します")
+        return TemplateDetector()
