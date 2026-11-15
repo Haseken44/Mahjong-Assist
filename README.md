@@ -4,7 +4,7 @@
 
 本番 URL: https://mahjong-assist.dxc-labo.cloud
 
-## できること（v0.2）
+## できること（v0.3）
 
 | 機能 | 内容 |
 |---|---|
@@ -75,24 +75,28 @@
 
 学習済みの AI モデルが無くても動くよう、2段構えにしています。
 
-0. **初期見本（牌の一覧画像）**: 全種類の牌を並べた画像から見本を一括登録できます。いまは仮の素材画像を使い、実物の牌の写真が届いたら差し替えます。
+0. **初期見本（自宅の牌セットの写真）**: ケースに全種類4枚ずつ並べた写真（`実物牌.png`、1744×1027）から136枚を切り出し、見本として一括登録します。牌の並びと位置は `tools/sheets/home_case.json` に書いてあります（上段: 筒子1〜9・東南西北白發 と 中の列、下段: 萬子1〜9・索子1〜7 と 8索・9索の列。1段目の5は赤五）。
 
-   【PC(ubuntu26)】画像をサーバーへ送る
+   【PC(ubuntu26)】写真をサーバーへ送る
 
    ```bash
-   scp 麻雀牌一覧.png ubuntu@mahjong-assist.dxc-labo.cloud:~/mahjong-assist/
+   scp 実物牌.png ubuntu@mahjong-assist.dxc-labo.cloud:~/mahjong-assist/
    ```
 
-   【Webサーバ(os3-379-22658)】取り込む（`--replace` で以前の一覧画像の見本を入れ替え）
+   【Webサーバ(os3-379-22658)】取り込む（`--replace` で以前の素材画像の見本を入れ替え）
 
    ```bash
    cd ~/mahjong-assist
-   .venv/bin/python -m tools.import_tile_sheet 麻雀牌一覧.png --preview check.png   # 確認だけ
-   .venv/bin/python -m tools.import_tile_sheet 麻雀牌一覧.png --save --replace
+   .venv/bin/python -m tools.import_tile_sheet 実物牌.png --config tools/sheets/home_case.json --preview check.png   # 確認だけ
+   .venv/bin/python -m tools.import_tile_sheet 実物牌.png --config tools/sheets/home_case.json --save --replace
    sudo systemctl restart mahjong-assist
    ```
 
-   画像は「1段目 萬子1〜5・赤5・6〜9、2段目 索子、3段目 筒子、4段目 東南西北白發中」の並びを想定しています。一覧画像の見本は `data/templates_seed/` に、画面で覚えさせた見本は `data/templates/` に分けて保存するので、差し替えても画面で覚えさせた分は残ります。画像ファイルはリポジトリに入れないでください（素材のライセンスのため）。
+   写真の見本は `data/templates_seed/` に、画面で覚えさせた見本は `data/templates/` に分けて保存するので、差し替えても画面で覚えさせた分は残ります。写真そのものはリポジトリに入れません。
+
+   撮り直した写真で牌の位置が変わったときは、`home_case.json` の `quad`（各ブロックの左上・右上・右下・左下の座標）と `row_edges`（段の境目、0〜1）を直し、`--preview check.png` で切り出し結果を確かめてから `--save --replace` します。格子状に並んだ一覧画像（素材画像）は `--config` を付けずに取り込めます（1段目 萬子1〜5・赤5・6〜9、2段目 索子、3段目 筒子、4段目 字牌の並び）。
+
+   **画面の牌の絵**: 手牌・牌ボタン・ドラ表示牌などの牌は、同じ写真から切り出した実物の牌の画像（`app/static/tiles/*.webp`、37種類）で表示します。写真を撮り直したときは【Webサーバ(os3-379-22658)】で `--export-ui app/static/tiles` を付けて取り込むと画面の絵も入れ替わります（画像が読めないときは文字で表示）。
 
 1. **見本照合方式（標準）**: 画像処理で白い牌の面を見つけて1枚ずつ切り出し、登録された「見本」と照合します。CPU だけで1フレーム約0.1秒。
    - 牌セットによって絵柄が違うため、**最初に一度、その卓の牌を覚えさせます**。手牌を横一列に並べてカメラに映し、画面下で左から順に正しい牌を入力して「この並びで覚える」を押します。37種類（34種＋赤五3種）がひと通り映るまで数回くり返すと、以降は自動で読めます。

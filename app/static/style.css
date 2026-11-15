@@ -73,6 +73,11 @@ video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; objec
 .tile.z6 { color: var(--sou); }
 .tile.selected { outline: 3px solid var(--accent); outline-offset: 1px; }
 .tile.win { box-shadow: 0 2px 0 var(--tile-edge), 0 0 0 2px var(--warn); }
+.tile.img { overflow: hidden; position: relative; }
+.tile.img .n, .tile.img .s { display: none; }
+.tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.tile.img.red::after { content: "赤"; position: absolute; right: 1px; top: 1px; font-size: 8px; line-height: 1; padding: 1px 2px; border-radius: 3px; background: var(--accent); color: #fff; }
+.tiles.small .tile.img.red::after { display: none; }
 .tiles.small .tile { width: 26px; height: 35px; } .tiles.small .tile .n { font-size: .85rem; } .tiles.small .tile .s { font-size: .55rem; }
 .hand .tile { width: calc((100% - 13 * 3px) / 14); max-width: 40px; height: auto; aspect-ratio: 3 / 4; }
 .dora-line { margin-top: 10px; font-size: .85rem; color: var(--muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

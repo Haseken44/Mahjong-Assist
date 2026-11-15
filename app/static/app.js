@@ -49,6 +49,15 @@ function tileEl(t, opts = {}) {
   s.className = "s";
   s.textContent = SUIT[t[1]] || "";
   el.append(n, s);
+  // 実物の牌の写真（app/static/tiles/）。読めなければ文字表示のまま。
+  const img = document.createElement("img");
+  img.src = `/static/tiles/${t}.webp?v=2`;
+  img.alt = "";
+  img.draggable = false;
+  img.decoding = "async";
+  img.onerror = () => { img.remove(); el.classList.remove("img"); };
+  el.classList.add("img");
+  el.append(img);
   return el;
 }
 function tilesInline(tiles) {

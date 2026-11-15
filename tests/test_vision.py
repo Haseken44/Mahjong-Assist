@@ -1,6 +1,6 @@
 import cv2
 
-from app.logic.tiles import ALL_TILES
+from app.logic.tiles import ALL_TILES, RED_TILES
 from app.vision.detector import TemplateDetector
 from app.vision.segmenter import crop, find_tiles
 from app.vision.templates import TemplateStore
@@ -100,3 +100,49 @@ def test_import_tile_sheet(tmp_path):
     hand = "1m 9m 0p 6p 7p 3s 4s 6s 7s 8s 5z 5z 1z".split()
     det = TemplateDetector(TemplateStore(tmp_path / "templates"))
     assert [d.tile for d in det.detect(table_image(hand))] == hand
+
+
+def test_import_with_config_and_ui_export(tmp_path):
+    """座標指定（斜めの写真・段ごとに高さが違う）で切り出し、赤五の位置と画面用画像の書き出しを確認する。"""
+    import numpy as np
+
+    from tests.synth import draw_tile
+    from tools.import_tile_sheet import export_ui, extract_with_config
+
+    labels = ["1m", "2m", "5m", "1z"]
+    heights = [70, 80, 90]  # 手前の段ほど大きく写る
+    w, x0, y0 = 60, 20, 20
+    img = np.full((y0 * 2 + sum(heights), x0 * 2 + w * len(labels), 3), 90, np.uint8)
+    y = y0
+    for r, h in enumerate(heights):
+        for c, t in enumerate(labels):
+            t = "0m" if (r, c) == (0, 2) else t
+            img[y:y + h, x0 + c * w:x0 + (c + 1) * w] = draw_tile(t, w, h)
+        y += h
+    H = sum(heights)
+    edges = [0, heights[0] / H, (heights[0] + heights[1]) / H, 1]
+    config = {"blocks": [{
+        "quad": [[x0, y0], [x0 + w * len(labels), y0], [x0 + w * len(labels), y0 + H], [x0, y0 + H]],
+        "rows": 3, "row_edges": edges, "labels": labels, "red": {"0": {"2": "0m"}},
+    }]}
+    tiles = extract_with_config(img, config)
+    assert [t for t, _ in tiles][:4] == ["1m", "2m", "0m", "1z"]
+    assert len(tiles) == 12
+
+    store = TemplateStore(tmp_path / "templates")
+    for t, im in tiles:
+        store.add(t, im, seed=True)
+    assert store.classify(tiles[-1][1])[0] == "1z"
+
+    export_ui(tiles, tmp_path / "ui")
+    assert sorted(p.name for p in (tmp_path / "ui").iterdir()) == ["0m.webp", "1m.webp", "1z.webp", "2m.webp", "5m.webp"]
+    im = cv2.imread(str(tmp_path / "ui" / "0m.webp"))
+    assert im.shape[:2] == (96, 72)
+
+
+def test_ui_tile_images_cover_all_kinds():
+    """画面表示用の実物牌の画像が全種類そろっている。"""
+    from pathlib import Path
+
+    d = Path(__file__).resolve().parents[1] / "app" / "static" / "tiles"
+    assert {p.stem for p in d.glob("*.webp")} == set(ALL_TILES) | set(RED_TILES)
