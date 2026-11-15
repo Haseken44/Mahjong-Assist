@@ -5,13 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f5132">
   <title>麻雀アシスト</title>
-  <link rel="stylesheet" href="/static/style.css?v=11">
+  <link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body>
   <header class="topbar">
     <h1>麻雀アシスト</h1>
+    <button id="glassBtn" class="glass-btn" title="スマートグラス用の表示に切り替え">グラス表示</button>
     <span id="mode" class="badge">接続中…</span>
   </header>
+
+  <!-- スマートグラス用の表示。スマホの画面をそのままグラスに映すので、黒い背景（グラスでは透明に見える）に
+       手牌と「何を切るか・狙える役」だけを大きく出す。カメラはスマホ側で動き続ける -->
+  <div id="glassView" class="glass" hidden>
+    <div class="g-frame" id="gFrame">
+      <div id="gStatus" class="g-status"></div>
+      <div id="gHand" class="g-hand"></div>
+      <div id="gMain" class="g-main"></div>
+      <div id="gSub" class="g-sub"></div>
+      <div id="gScore" class="g-score" hidden></div>
+      <div class="g-tap" id="gTap">画面をタップすると点数を表示</div>
+    </div>
+    <div class="g-controls">
+      <button id="gCam">カメラ開始</button>
+      <button id="gOk" hidden>OK（確定）</button>
+      <button id="gExit">通常表示に戻る</button>
+    </div>
+  </div>
 
   <main>
     <section class="card guide" id="guide">
@@ -168,6 +187,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">鳴き（ポン・チー・カン）とドラ表示牌は画面のボタンで入力します。カメラで自動的に読み取るのは手牌だけです（鳴き・ドラ表示牌の自動認識は今後対応予定）。<br>v0.4</footer>
-  <script src="/static/app.js?v=11"></script>
+  <script src="/static/app.js?v=12"></script>
 </body>
 </html>
