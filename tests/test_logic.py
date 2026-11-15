@@ -322,3 +322,6 @@ def test_score_both_shows_other_seat_tsumo():
     other = d["tsumo_other"]
     assert d["dealer"] and not other["dealer"]
     assert [p["who"] for p in other["pays"]] == ["親", "子 2人がそれぞれ"]
+
+    ron, ron_child = d["ron"]["total"], d["ron_other"]["total"]
+    assert ron > ron_child  # 親のロンは子のロンより高い（約1.5倍）
