@@ -61,6 +61,12 @@ class RoundSettings(BaseModel):
     is_riichi: bool = False
     is_tsumo: bool = False
     is_ippatsu: bool = False
+    # 特別な状況の役（チェックしたときだけ付く）
+    is_double_riichi: bool = Field(False, description="ダブルリーチ（最初の打牌でリーチ）")
+    is_rinshan: bool = Field(False, description="嶺上開花（カンしてもらった牌でツモ）")
+    is_chankan: bool = Field(False, description="槍槓（他家が加カンした牌でロン）")
+    is_last_tile: bool = Field(False, description="最後の牌でアガリ（ツモなら海底摸月・ロンなら河底撈魚）")
+    is_first_draw: bool = Field(False, description="配牌直後の最初のツモでアガリ（親は天和・子は地和）")
     honba: int = Field(0, ge=0, le=20)
     kyoutaku: int = Field(0, ge=0, le=20, description="供託リーチ棒の本数")
     win_tile: str | None = Field(None, description="アガリ牌（省略時は手牌の最後の牌）")

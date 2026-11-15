@@ -83,12 +83,18 @@ function readSettings() {
     is_riichi: $("riichi").checked && !isOpen(),
     is_tsumo: $("tsumo").checked,
     is_ippatsu: $("ippatsu").checked,
+    is_double_riichi: $("dblRiichi").checked && !isOpen(),
+    is_rinshan: $("rinshan").checked,
+    is_chankan: $("chankan").checked,
+    is_last_tile: $("lastTile").checked,
+    is_first_draw: $("firstDraw").checked && !state.melds.length,
     dora_indicators: state.dora.slice(0, doraSlots()).filter(Boolean),
     ura_indicators: $("riichi").checked && !isOpen() ? state.ura.slice(0, uraSlots()).filter(Boolean) : [],
     win_tile: winTile,
   };
 }
-const SETTING_IDS = ["seatWind", "roundWind", "honba", "riichi", "tsumo", "ippatsu", "nukidora"];
+const SETTING_IDS = ["seatWind", "roundWind", "honba", "riichi", "tsumo", "ippatsu", "nukidora",
+  "dblRiichi", "rinshan", "chankan", "lastTile", "firstDraw"];
 const SANMA_EXCLUDED = new Set(["2m", "3m", "4m", "5m", "6m", "7m", "8m", "0m"]);
 
 function playersValue() {
@@ -449,13 +455,78 @@ function section(title, items) {
   return frag;
 }
 
+function shortPay(r) {
+  if (!r || !r.ok) return null;
+  return `${r.total.toLocaleString()}点`;
+}
+
 function waitItem(w) {
-  const pts = w.ok ? `${w.payment}${w.level ? "（" + w.level + "）" : ""}` : "役なし";
-  let meta = w.ok ? `${w.han}翻${w.fu ? w.fu + "符" : ""} ${w.yaku.join("・")}` : (w.error || "");
+  let pts;
+  if (w.ron || w.tsumo) {
+    const ron = shortPay(w.ron), tsu = w.tsumo && w.tsumo.ok ? w.tsumo.payment.replace(/^ツモ /, "").replace(/（.*$/, "") : null;
+    const box = document.createElement("span");
+    box.className = "pts two";
+    box.append(span(ron ? `ロン ${ron}` : "ロン 役なし"), document.createElement("br"), span(tsu ? `ツモ ${tsu}` : "ツモ 役なし", "sub"));
+    pts = box;
+  } else {
+    pts = span(w.ok ? `${w.payment}${w.level ? "（" + w.level + "）" : ""}` : "役なし", "pts");
+  }
+  let meta = w.ok ? `${w.han}翻${w.fu ? w.fu + "符" : ""}${w.level ? " " + w.level : ""} ${w.yaku.join("・")}` : (w.error || "");
   if (w.riichi_needed) meta = "※リーチが必要（役なし）　" + meta;
   const body = document.createElement("div");
   body.append(span(`残り${w.remaining}枚`, "meta nowrap"), document.createElement("br"), span(meta, "meta"));
-  return li([tilesInline([w.tile]), body, span(pts, "pts")]);
+  return li([tilesInline([w.tile]), body, pts]);
+}
+
+// アガリ形の点数（ロン・ツモの片方）を1枚のカードにする
+function scoreCard(r, title, selected) {
+  const box = document.createElement("div");
+  box.className = "score-box" + (selected ? " selected" : "");
+  const h = document.createElement("div");
+  h.className = "score-title";
+  h.textContent = title;
+  box.append(h);
+  if (!r.ok) {
+    box.append(span(r.error, "err"));
+    return box;
+  }
+  box.append(span(`${r.total.toLocaleString()}点`, "big"));
+  const pays = document.createElement("ul");
+  pays.className = "pays";
+  (r.pays || []).forEach((p) => {
+    const l = document.createElement("li");
+    l.textContent = `${p.who} ${p.points.toLocaleString()}点`;
+    pays.append(l);
+  });
+  box.append(pays);
+  box.append(span(`${r.han}翻${r.fu ? " " + r.fu + "符" : ""}${r.level ? "　" + r.level : ""}`, "hanfu"));
+  const ul = document.createElement("ul");
+  r.yaku.forEach((y) => {
+    const l = document.createElement("li");
+    l.textContent = `${y.name}${y.yakuman ? "（役満）" : `　${y.han}翻`}`;
+    ul.append(l);
+  });
+  box.append(ul);
+  if (r.fu_details && r.fu_details.length) {
+    const d = document.createElement("details");
+    d.className = "fu";
+    const sm = document.createElement("summary");
+    sm.textContent = `符の計算（${r.fu}符）`;
+    const t = document.createElement("table");
+    r.fu_details.forEach((f) => {
+      const tr = t.insertRow();
+      tr.insertCell().textContent = f.name;
+      tr.insertCell().textContent = `${f.fu}符`;
+    });
+    const sum = t.insertRow();
+    sum.className = "sum";
+    sum.insertCell().textContent = r.fu_raw !== r.fu ? `合計 ${r.fu_raw}符 → 10符単位に切り上げ` : "合計";
+    sum.insertCell().textContent = `${r.fu}符`;
+    d.append(sm, t);
+    if (r.han >= 5) d.append(span("※5翻以上（満貫以上）は、符に関係なく点数が決まります", "meta"));
+    box.append(d);
+  }
+  return box;
 }
 
 function renderAnalysis(a) {
@@ -466,24 +537,14 @@ function renderAnalysis(a) {
   }
   $("message").textContent = a.message || a.shanten_label || "";
 
-  if (a.score) {
-    const box = document.createElement("div");
-    box.className = "score-box";
-    if (a.score.ok) {
-      box.append(span(`${a.score.total.toLocaleString()}点`, "big"));
-      box.append(document.createElement("br"));
-      box.append(span(`${a.score.payment}　${a.score.han}翻${a.score.fu ? a.score.fu + "符" : ""} ${a.score.level || ""}`));
-      const ul = document.createElement("ul");
-      a.score.yaku.forEach((y) => {
-        const l = document.createElement("li");
-        l.textContent = `${y.name}${y.yakuman ? "（役満）" : `　${y.han}翻`}`;
-        ul.append(l);
-      });
-      box.append(ul);
-    } else {
-      box.append(span(a.score.error, "err"));
-    }
-    $("score").append(box);
+  if (a.scores) {
+    const wrap = document.createElement("div");
+    wrap.className = "score-pair";
+    wrap.append(scoreCard(a.scores.ron, "ロンなら（捨て牌でアガリ）", a.scores.selected === "ron"),
+      scoreCard(a.scores.tsumo, "ツモなら（自分で引いてアガリ）", a.scores.selected === "tsumo"));
+    $("score").append(wrap);
+  } else if (a.score) {
+    $("score").append(scoreCard(a.score, a.score.tsumo ? "ツモ" : "ロン", true));
   }
 
   if (a.waits && a.waits.length) {

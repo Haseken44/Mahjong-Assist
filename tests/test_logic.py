@@ -267,3 +267,48 @@ def test_bad_meld_shapes():
               {"type": "chi", "tiles": ["1z", "2z", "3z"]}, {"type": "kan", "tiles": ["1m"] * 3}):
         with pytest.raises(ValueError):
             RoundSettings(melds=[m])
+
+
+def test_score_both_ron_and_tsumo_payments():
+    from app.logic.scorer import score_both
+
+    hand = "2m 3m 4m 0p 6p 7p 3s 4s 5s 6s 7s 8s 5p 5p".split()
+    child = score_both(hand, RoundSettings(seat_wind="south"))
+    ron, tsumo = child["ron"], child["tsumo"]
+    assert ron["ok"] and tsumo["ok"]
+    assert ron["pays"] == [{"who": "放銃した人（ロンされた人）", "points": ron["total"]}]
+    who = [p["who"] for p in tsumo["pays"]]
+    assert who == ["親", "子 2人がそれぞれ"]
+    assert tsumo["total"] == tsumo["pays"][0]["points"] + 2 * tsumo["pays"][1]["points"]
+    dealer = score_both(hand, RoundSettings(seat_wind="east"))["tsumo"]
+    assert dealer["pays"][0]["who"] == "子 3人がそれぞれ"
+    assert dealer["payment"].endswith("オール")
+
+
+def test_fu_breakdown():
+    # 1索の暗刻（么九牌の暗刻 8符）+ 嵌張待ち 2符 + 門前ロン → 20+10+8+2 = 40符
+    hand = "1s 1s 1s 2m 3m 4m 6p 7p 8p 5s 5s 4p 6p 5p".split()
+    r = score_hand(hand, RoundSettings(seat_wind="south", is_riichi=True), win_tile="5p", tsumo=False)
+    names = {d["name"]: d["fu"] for d in r.fu_details}
+    assert names["副底（アガリの基本）"] == 20 and names["門前ロン（鳴かずにロン）"] == 10
+    assert names["暗刻（1・9・字牌）"] == 8 and names["嵌張（カンチャン）待ち"] == 2
+    assert r.fu_raw == 40 and r.fu == 40
+    chiitoi = "1m 1m 3p 3p 5s 5s 7s 7s 2z 2z 6z 6z 9p 9p".split()
+    r = score_hand(chiitoi, RoundSettings(seat_wind="south", is_riichi=True))
+    assert r.fu == 25 and r.fu_details == [{"name": "七対子（固定）", "fu": 25}]
+
+
+def test_special_situation_yaku():
+    hand = "2m 3m 4m 0p 6p 7p 3s 4s 5s 6s 7s 8s 5p 5p".split()
+    s = RoundSettings(seat_wind="south", is_rinshan=True, is_last_tile=True)
+    tsumo = score_hand(hand, s, tsumo=True)
+    assert "嶺上開花" in [y["name"] for y in tsumo.yaku]
+    assert not score_hand(hand, s, tsumo=False).ok  # 嶺上開花はロンでは無い
+    ron = score_hand(hand, RoundSettings(seat_wind="south", is_last_tile=True), tsumo=False)
+    assert "河底撈魚" in {y["name"] for y in ron.yaku}
+    ron = score_hand(hand, RoundSettings(seat_wind="south", is_chankan=True), tsumo=False)
+    assert "槍槓" in {y["name"] for y in ron.yaku}
+    both = score_hand(hand, RoundSettings(seat_wind="south", is_last_tile=True, is_chankan=True), tsumo=False)
+    assert not both.ok and "同時" in both.error
+    first = score_hand(hand, RoundSettings(seat_wind="east", is_first_draw=True), tsumo=True)
+    assert any(y["name"] == "天和" for y in first.yaku)
