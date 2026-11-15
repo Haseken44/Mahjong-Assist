@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f5132">
   <title>麻雀アシスト</title>
-  <link rel="stylesheet" href="/static/style.css?v=8">
+  <link rel="stylesheet" href="/static/style.css?v=9">
 </head>
 <body>
   <header class="topbar">
@@ -124,6 +124,17 @@
         <label class="check"><input id="ippatsu" type="checkbox"> 一発</label>
         <label class="sanma-only" hidden>抜きドラ（北）<input id="nukidora" type="number" min="0" max="4" value="0" inputmode="numeric"></label>
       </div>
+      <p class="tip">「ツモ」は、点数を大きく表示する方を選ぶだけです。アガリ形になると、ロンとツモの両方の点数を表示します。</p>
+      <details class="special">
+        <summary>めったにない役（あてはまるときだけチェック）</summary>
+        <div class="settings">
+          <label class="check"><input id="dblRiichi" type="checkbox"> ダブルリーチ<small>最初の打牌でリーチ</small></label>
+          <label class="check"><input id="rinshan" type="checkbox"> 嶺上開花<small>カンして引いた牌でツモ</small></label>
+          <label class="check"><input id="chankan" type="checkbox"> 槍槓<small>他人の加カンの牌でロン</small></label>
+          <label class="check"><input id="lastTile" type="checkbox"> 海底・河底<small>山の最後の牌でアガリ</small></label>
+          <label class="check"><input id="firstDraw" type="checkbox"> 天和・地和<small>配牌から最初のツモでアガリ</small></label>
+        </div>
+      </details>
       <p class="tip sanma-only" hidden>三人麻雀：萬子は1と9だけ。ドラ表示牌が一萬ならドラは九萬。北は抜くとドラ1（ルール設定で変更可）。</p>
     </section>
 
@@ -157,6 +168,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">鳴き（ポン・チー・カン）とドラ表示牌は画面のボタンで入力します。カメラで自動的に読み取るのは手牌だけです（鳴き・ドラ表示牌の自動認識は今後対応予定）。<br>v0.4</footer>
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 </html>

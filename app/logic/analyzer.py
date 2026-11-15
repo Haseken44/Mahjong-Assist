@@ -6,7 +6,7 @@ from collections import Counter
 from mahjong.shanten import Shanten
 
 from . import tiles as T
-from .scorer import score_hand
+from .scorer import score_both, score_hand
 from .settings import RoundSettings
 
 _shanten = Shanten()
@@ -60,13 +60,18 @@ def _wait_scores(hand13: list[str], waits: list[dict], settings: RoundSettings) 
     out = []
     for w in waits:
         tile = w["tile"]
-        r = score_hand(hand13 + [tile], settings, win_tile=tile)
+        s = settings
+        r = score_hand(hand13 + [tile], s, win_tile=tile)
         riichi_needed = False
         if not r.ok and not settings.is_riichi and not settings.is_open and r.error and "役なし" in r.error:
             # 門前なのでリーチをかければアガれる。リーチ時の点数を示す
-            r2 = score_hand(hand13 + [tile], settings.model_copy(update={"is_riichi": True}), win_tile=tile)
+            s2 = settings.model_copy(update={"is_riichi": True})
+            r2 = score_hand(hand13 + [tile], s2, win_tile=tile)
             if r2.ok:
-                r, riichi_needed = r2, True
+                r, riichi_needed, s = r2, True, s2
+        # ロン・ツモ両方の点数（表示用）
+        ron = score_hand(hand13 + [tile], s, win_tile=tile, tsumo=False)
+        tsu = score_hand(hand13 + [tile], s, win_tile=tile, tsumo=True)
         out.append({
             "riichi_needed": riichi_needed,
             "tile": tile,
@@ -78,6 +83,10 @@ def _wait_scores(hand13: list[str], waits: list[dict], settings: RoundSettings) 
             "fu": r.fu,
             "level": r.level,
             "yaku": [y["name"] for y in r.yaku],
+            "ron": {"ok": ron.ok, "total": ron.total, "payment": ron.payment, "han": ron.han, "fu": ron.fu,
+                    "level": ron.level, "error": ron.error},
+            "tsumo": {"ok": tsu.ok, "total": tsu.total, "payment": tsu.payment, "han": tsu.han, "fu": tsu.fu,
+                      "level": tsu.level, "error": tsu.error},
             "error": r.error,
         })
     return out
@@ -253,7 +262,9 @@ def analyze(hand: list[str], settings: RoundSettings) -> dict:
         sh = shanten_of(T.to_34_array(hand), closed)
         result.update(shanten=sh, shanten_label=shanten_label(sh))
         if sh == -1:
-            result["score"] = score_hand(hand, settings).as_dict()
+            both = score_both(hand, settings)
+            result["score"] = both[both["selected"]]
+            result["scores"] = both
             result["message"] = "アガリ形です！"
         options = discard_options(hand, settings)
         result["discards"] = options
