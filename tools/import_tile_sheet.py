@@ -132,8 +132,8 @@ def extract_with_config(img: np.ndarray, config: dict) -> list[tuple[str, np.nda
     W0, H0 = config.get("image_size", [img.shape[1], img.shape[0]])
     sx, sy = img.shape[1] / W0, img.shape[0] / H0
     out = []
-    cw, ch = 96, 128
-    dst = np.float32([[0, 0], [cw, 0], [cw, ch], [0, ch]])
+    cw, ch, M = 96, 128, 26  # 格子1マスを 96x128 に広げ、周りに M 画素の余白を付けて縁を探す
+    dst = np.float32([[M, M], [M + cw, M], [M + cw, M + ch], [M, M + ch]])
     for b in config["blocks"]:
         tl, tr, br, bl = [(x * sx, y * sy) for x, y in b["quad"]]
         rows, labels = b["rows"], b["labels"]
@@ -149,10 +149,63 @@ def extract_with_config(img: np.ndarray, config: dict) -> list[tuple[str, np.nda
                 for u, v in ((u0, v0), (u1, v0), (u1, v1), (u0, v1)):
                     pts.append(_lerp(_lerp(tl, tr, u), _lerp(bl, br, u), v))
                 m = cv2.getPerspectiveTransform(np.float32(pts), dst)
-                cell = cv2.warpPerspective(img, m, (cw, ch))
+                cell = cv2.warpPerspective(img, m, (cw + 2 * M, ch + 2 * M), borderMode=cv2.BORDER_REPLICATE)
                 name = red.get(str(r), {}).get(str(c), label)
-                out.append((name, cell[7:-7, 8:-8]))
+                out.append((name, snap_face(cell, M, cw, ch)))
     return out
+
+
+def _seam_score(gray: np.ndarray, axis: int) -> np.ndarray:
+    """列（axis=1）または行（axis=0）ごとの「境目の溝らしさ」(0〜1)。
+
+    境目は牌の端から端まで続く細い溝なので、「両隣より暗い画素の割合」が高くなる。
+    絵柄も暗いが途切れるので割合は低い。
+    """
+    g = gray if axis == 1 else gray.T
+    d = 3
+    left = np.full_like(g, 255.0)
+    right = np.full_like(g, 255.0)
+    left[:, d:] = g[:, :-d]
+    right[:, :-d] = g[:, d:]
+    valley = (g + 4 < left) & (g + 4 < right)
+    return valley.mean(axis=0)
+
+
+def _nearest_seam(score: np.ndarray, center: int, reach: int, thr: float = 0.45) -> int | None:
+    """center±reach で一番はっきりした溝（近いほど少し優先）。"""
+    best, best_v = None, -1.0
+    for x in range(max(1, center - reach), min(len(score) - 1, center + reach + 1)):
+        v = score[x] - 0.01 * abs(x - center)
+        if score[x] >= thr and v > best_v:
+            best, best_v = x, v
+    return best
+
+
+def snap_face(cell: np.ndarray, M: int, cw: int, ch: int) -> np.ndarray:
+    """格子のマス（周りに余白 M 付き）から、牌の面の実際の縁を探して切り出す。
+
+    格子の位置は写真のゆがみで数画素〜十数画素ずれるので、牌どうしの境目（端から端まで
+    続く細い溝）を探して、隣の牌がはみ出さず牌の面が中央に来るようにする。
+    """
+    gray = cv2.GaussianBlur(cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY), (3, 3), 0).astype(np.float32)
+    reach = 22
+    inner = gray[M + int(ch * 0.1):M + int(ch * 0.9)]          # 上下の境目の影響を除いた行
+    cols = _seam_score(inner, axis=1)
+    left, right = _nearest_seam(cols, M, reach), _nearest_seam(cols, M + cw, reach)
+    x0 = left + 2 if left is not None else M + 5
+    x1 = right - 1 if right is not None else M + cw - 5
+    band = gray[:, max(0, x0 + int(cw * 0.1)):x1 - int(cw * 0.1)]
+    rows = _seam_score(band, axis=0)
+    top, bottom = _nearest_seam(rows, M, reach), _nearest_seam(rows, M + ch, reach)
+    y0 = top + 2 if top is not None else M + 5
+    y1 = bottom - 1 if bottom is not None else M + ch - 5
+    if not (cw * 0.8 < x1 - x0 < cw * 1.2):  # 境目を見誤ったときは格子どおり
+        x0, x1 = M + 7, M + cw - 7
+    if not (ch * 0.8 < y1 - y0 < ch * 1.2):
+        y0, y1 = M + 6, M + ch - 6
+    # 縁の丸み・影を少し内側に削る
+    ix, iy = max(2, int((x1 - x0) * 0.04)), max(2, int((y1 - y0) * 0.03))
+    return cell[y0 + iy:y1 - iy, x0 + ix:x1 - ix].copy()
 
 
 def export_ui(tiles: list[tuple[str, np.ndarray]], out_dir: Path) -> None:

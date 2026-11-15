@@ -26,6 +26,7 @@ from .logic import tiles as T
 from .logic.analyzer import analyze
 from .logic.settings import RoundSettings
 from .vision.detector import load_detector
+from .vision.quality import frame_hints
 from .vision.preprocessor import decode_image, preprocess
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -34,7 +35,7 @@ log = logging.getLogger("mahjong-assist")
 STATIC = Path(__file__).parent / "static"
 MAX_FRAME_BYTES = 3 * 1024 * 1024
 
-app = FastAPI(title="Mahjong Vision Assist", version="0.3.0")
+app = FastAPI(title="Mahjong Vision Assist", version="0.4.0")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 detector = load_detector()
 
@@ -77,8 +78,10 @@ async def api_analyze(req: AnalyzeRequest) -> dict:
 
 
 class Stabilizer:
-    """直近のフレームで同じ手牌が何度も読めたときだけ「確定」とし、表示のちらつきを抑える。
+    """直近のフレームの読み取り結果を多数決でまとめ、手牌を「確定」する（表示のちらつきを抑える）。
 
+    カメラ映像では1〜2枚が毎回少しずつ読み違えることがあるので、手牌全体の一致ではなく
+    「枚数が同じフレームどうしで、位置ごとの多数決」で決める。
     プレイヤーがアシストと違う牌を切っても、次に安定して読めた手牌で分析し直す。
     """
 
@@ -88,12 +91,25 @@ class Stabilizer:
         self.stable: tuple | None = None
 
     def push(self, tiles: list[str | None]) -> tuple[list[str] | None, bool]:
-        """(確定した手牌, 今回変わったか) を返す。"""
+        """(確定した手牌, 今回変わったか) を返す。tiles は一番近い牌の候補（不明は None）。"""
         self.history.append(tuple(tiles))
-        cand, n = Counter(self.history).most_common(1)[0]
-        if n >= self.need and cand and None not in cand and cand != self.stable:
-            self.stable = cand
-            return list(cand), True
+        length, n = Counter(len(h) for h in self.history if h).most_common(1)[0] if any(self.history) else (0, 0)
+        if n >= self.need:
+            same = [h for h in self.history if len(h) == length]
+            cand = []
+            for i in range(length):
+                votes = Counter(h[i] for h in same if h[i])
+                if not votes:
+                    cand = None
+                    break
+                tile, k = votes.most_common(1)[0]
+                if k * 2 <= len(same):  # 過半数に届かない位置がある → まだ決めない
+                    cand = None
+                    break
+                cand.append(tile)
+            if cand and tuple(cand) != self.stable:
+                self.stable = tuple(cand)
+                return list(cand), True
         return (list(self.stable) if self.stable else None), False
 
 
@@ -121,15 +137,20 @@ def _process_frame(data: bytes | str, sess: PlayerSession) -> dict:
         return {"type": "error", "message": "画像を読み込めませんでした"}
     img = preprocess(img)
     sess.last_frame = img
-    dets = _drop_meld_tiles(detector.detect(img), sess.settings)
+    raw = detector.detect(img)
+    dets = _drop_meld_tiles(raw, sess.settings)
     tiles = [d.tile for d in dets]
-    hand, changed = sess.stab.push(tiles)
+    h, w = img.shape[:2]
+    boxes = [(int(d.box[0] * w), int(d.box[1] * h), int((d.box[2] - d.box[0]) * w), int((d.box[3] - d.box[1]) * h))
+             for d in raw]
+    hand, changed = sess.stab.push([d.best for d in dets])
     out = {
         "type": "detection",
         "mode": detector.mode,
         "detections": [d.as_dict() for d in dets],
         "seen": len(dets),
         "unknown": sum(1 for t in tiles if t is None),
+        "hints": frame_hints(img, boxes, 14 - 3 * len(sess.settings.melds)),
         "hand": hand,
         "changed": changed,
     }

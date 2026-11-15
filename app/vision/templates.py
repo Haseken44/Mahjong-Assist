@@ -147,8 +147,11 @@ class TemplateStore:
             self.labels = self.labels + [tile] * len(fs)
             self.features = np.vstack([self.features, fs]) if self.features.shape[1] == fs.shape[1] else fs
 
-    def classify(self, tile_img: np.ndarray) -> tuple[str | None, float]:
-        """(牌, 信頼度0〜1) を返す。見本が無い・似ていない場合は (None, 0)。"""
+    def classify(self, tile_img: np.ndarray, guess: bool = False) -> tuple[str | None, float]:
+        """(牌, 信頼度0〜1) を返す。見本が無い・似ていない場合は (None, 0)。
+
+        guess=True なら、似ていなくても一番近い牌を信頼度 0 で返す（手牌の候補として使う）。
+        """
         with self.lock:
             labels, feats = self.labels, self.features
         if not labels:
@@ -163,6 +166,6 @@ class TemplateStore:
             if d[order[0]] < best_d:
                 best_label, best_d, second_d = lab, float(d[order[0]]), float(other)
         if best_d > UNKNOWN_DISTANCE:
-            return None, 0.0
+            return (best_label if guess else None), 0.0
         conf = 1.0 - best_d / second_d if second_d < 1e9 else 1.0 - best_d
         return best_label, max(0.0, min(1.0, conf))
