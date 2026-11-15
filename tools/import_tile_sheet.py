@@ -1,13 +1,18 @@
 """牌の一覧画像（全種類の牌を格子状に並べた画像）から、認識用の見本を一括登録する。
 
 使い方（【Webサーバ(os3-379-22658)】で実行）:
+    # 自宅の牌セットの写真（並びの座標は tools/sheets/home_case.json）
+    .venv/bin/python -m tools.import_tile_sheet 実物牌.png --config tools/sheets/home_case.json --save --replace
+    # 画面の牌の絵も入れ替えるとき（app/static/tiles/*.webp）
+    .venv/bin/python -m tools.import_tile_sheet 実物牌.png --config tools/sheets/home_case.json --export-ui app/static/tiles
+
     cd ~/mahjong-assist
     .venv/bin/python -m tools.import_tile_sheet 麻雀牌一覧.png            # 確認だけ（保存しない）
     .venv/bin/python -m tools.import_tile_sheet 麻雀牌一覧.png --save     # data/templates_seed/ に登録
     .venv/bin/python -m tools.import_tile_sheet 実物の写真.png --save --replace   # 写真を差し替えるとき
     sudo systemctl restart mahjong-assist
 
-画像ファイルはリポジトリに入れない（素材のライセンスのため）。サーバーへは【PC(ubuntu26)】から scp で送る。
+元の画像ファイルはリポジトリに入れない（素材のライセンスのため）。画面用の牌の絵 app/static/tiles/ だけはコミットする。サーバーへは【PC(ubuntu26)】から scp で送る。
 
 画像の並び（既定 --layout standard）:
     1段目: 一〜伍萬, 赤伍萬, 六〜九萬
@@ -113,10 +118,64 @@ def extract(img: np.ndarray, layout: str = "standard") -> list[tuple[str, np.nda
     return out
 
 
+def _lerp(a, b, t):
+    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+
+
+def extract_with_config(img: np.ndarray, config: dict) -> list[tuple[str, np.ndarray]]:
+    """設定ファイル（牌の並びを四角形で指定）に従って、写真から牌を1枚ずつ切り出す。
+
+    各ブロックは4隅の座標 quad（左上・右上・右下・左下）と段数 rows、列ごとの牌 labels を持つ。
+    red は赤五の位置 {"段": {"列": "0p"}}。写真が斜めでも格子を補間して切り出す。
+    row_edges（省略可）は段の境目の位置（0〜1）。手前の段ほど大きく写る写真で使う。
+    """
+    W0, H0 = config.get("image_size", [img.shape[1], img.shape[0]])
+    sx, sy = img.shape[1] / W0, img.shape[0] / H0
+    out = []
+    cw, ch = 96, 128
+    dst = np.float32([[0, 0], [cw, 0], [cw, ch], [0, ch]])
+    for b in config["blocks"]:
+        tl, tr, br, bl = [(x * sx, y * sy) for x, y in b["quad"]]
+        rows, labels = b["rows"], b["labels"]
+        red = b.get("red", {})
+        edges = b.get("row_edges") or [r / rows for r in range(rows + 1)]
+        if len(edges) != rows + 1:
+            raise SystemExit(f"row_edges は段数+1 個必要です（{labels[0]} のブロック）")
+        for r in range(rows):
+            v0, v1 = edges[r], edges[r + 1]
+            for c, label in enumerate(labels):
+                pts = []
+                u0, u1 = c / len(labels), (c + 1) / len(labels)
+                for u, v in ((u0, v0), (u1, v0), (u1, v1), (u0, v1)):
+                    pts.append(_lerp(_lerp(tl, tr, u), _lerp(bl, br, u), v))
+                m = cv2.getPerspectiveTransform(np.float32(pts), dst)
+                cell = cv2.warpPerspective(img, m, (cw, ch))
+                name = red.get(str(r), {}).get(str(c), label)
+                out.append((name, cell[7:-7, 8:-8]))
+    return out
+
+
+def export_ui(tiles: list[tuple[str, np.ndarray]], out_dir: Path) -> None:
+    """画面表示用に、牌の種類ごとに一番くっきり写った1枚を WebP（72x96）で書き出す。"""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    best: dict[str, tuple[float, np.ndarray]] = {}
+    for label, im in tiles:
+        face = im
+        sharp = cv2.Laplacian(cv2.cvtColor(face, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
+        if label not in best or sharp > best[label][0]:
+            best[label] = (sharp, face)
+    for label, (_, face) in best.items():
+        face = cv2.resize(face, (72, 96), interpolation=cv2.INTER_AREA)
+        cv2.imwrite(str(out_dir / f"{label}.webp"), face, [cv2.IMWRITE_WEBP_QUALITY, 88])
+    print(f"画面表示用の牌画像を {len(best)} 種類書き出しました: {out_dir}")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("image", type=Path)
     ap.add_argument("--layout", default="standard", choices=sorted(LAYOUTS))
+    ap.add_argument("--config", type=Path, help="牌の並びを座標で指定した設定ファイル（例: tools/sheets/home_case.json）")
+    ap.add_argument("--export-ui", type=Path, help="画面表示用の牌画像（1種類1枚）を書き出すフォルダ（例: app/static/tiles）")
     ap.add_argument("--save", action="store_true", help="初期見本として data/templates_seed/ に保存する")
     ap.add_argument("--replace", action="store_true", help="保存前に以前取り込んだ初期見本を消す（写真の差し替え用）")
     ap.add_argument("--preview", type=Path, help="切り出し結果を並べた確認用画像を書き出す")
@@ -126,15 +185,25 @@ def main(argv: list[str] | None = None) -> int:
     if img is None:
         print(f"画像を読み込めません: {args.image}", file=sys.stderr)
         return 1
-    if max(img.shape[:2]) < 900:  # 小さい画像は拡大してから切り出す
-        img = cv2.resize(img, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-    tiles = extract(img, args.layout)
-    print(f"{len(tiles)} 種類の牌を切り出しました: {' '.join(t for t, _ in tiles)}")
+    if args.config:
+        import json
+
+        tiles = extract_with_config(img, json.loads(args.config.read_text(encoding="utf-8")))
+    else:
+        if max(img.shape[:2]) < 900:  # 小さい画像は拡大してから切り出す
+            img = cv2.resize(img, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+        tiles = extract(img, args.layout)
+    kinds = sorted({t for t, _ in tiles})
+    print(f"{len(tiles)} 枚（{len(kinds)} 種類）の牌を切り出しました")
+    if args.export_ui:
+        export_ui(tiles, args.export_ui)
 
     if args.preview:
-        h = 96
-        strip = [cv2.resize(t, (int(h * t.shape[1] / t.shape[0]), h)) for _, t in tiles]
-        cv2.imwrite(str(args.preview), np.hstack(strip))
+        h, per_row = 96, 18
+        strip = [cv2.resize(t, (72, h)) for _, t in tiles]
+        strip += [np.full_like(strip[0], 255)] * (-len(strip) % per_row)
+        rows = [np.hstack(strip[i:i + per_row]) for i in range(0, len(strip), per_row)]
+        cv2.imwrite(str(args.preview), np.vstack(rows))
         print(f"確認用画像: {args.preview}")
 
     if args.save:

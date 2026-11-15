@@ -12,7 +12,8 @@
 - 四人麻雀と三人麻雀（`RoundSettings.players`）の両方に対応する。三麻は萬子2〜8なし・北抜きドラ・1m→9m ドラ・ツモ損あり/折半。
 - ルールは `app/logic/rules.py` の `Rules`（既定＝雀魂の段位戦）で切り替える。新しいルール差はここに項目を足し、`scorer.py`/`analyzer.py` で参照する。
 - 鳴きは `RoundSettings.melds`、カンの回数は `table_kans`（卓全体・最大4回）。ドラ表示牌は 1＋カン回数 枚まで。ドラは `scorer.py` で自前で数える（三麻・裏ドラ対応のため）。
-- 牌の一覧画像などの素材ファイルはコミットしない。初期見本は `tools/import_tile_sheet.py` で `data/templates_seed/` に入れる。
+- 牌の一覧画像・撮影した写真そのものはコミットしない。初期見本は `tools/import_tile_sheet.py` で `data/templates_seed/` に入れる（自宅の牌セットは `--config tools/sheets/home_case.json`）。
+- 画面の牌の絵は `app/static/tiles/<牌>.webp`（実物写真から `--export-ui` で書き出した 72x96、37種類）。これだけはコミットする。読めないときは文字表示に戻る。
 - 本番は `127.0.0.1:8030` で uvicorn（workers=1）。nginx が https://mahjong-assist.dxc-labo.cloud から転送する。同じサーバーの他サイト（ポート 8000, 8010-8014, 8020, 8021）に触れない。
 
 - 手順やコマンドを書くときは、実行場所を必ず明記する：【PC(ubuntu26)】【Webサーバ(os3-379-22658)】【ブラウザ(GitHub)】【スマホ】（README の「実行場所の表記」参照）。
