@@ -8,8 +8,14 @@
 - 点数計算は `mahjong` ライブラリ (1.4.0) を `app/logic/scorer.py` 経由で使う。直接呼ばない。
 - 画像認識は `app/vision/detector.py`。`models/mahjong_best.pt` があれば YOLO、無ければ見本照合方式（`segmenter.py` で切り出し、`templates.py` でプレイヤーが教えた見本と照合）。モデルファイルと `data/` はコミットしない。
 - アシストは助言にすぎない。プレイヤーが従わなくても、毎フレーム読み直した手牌で分析し直すこと（前回の助言を前提にしない）。
-- 4人がそれぞれ自分のスマホで同時に使う。接続ごとの状態は `PlayerSession` に閉じ込め、グローバルな可変状態は見本ストア（全員共有）だけにする。
+- 4人（三麻なら3人）がそれぞれ自分のスマホで同時に使う。手牌・分析・映像は接続ごとの `PlayerSession` に閉じ込め、他の接続や API に絶対に出さない。共有してよいのは牌1枚単位の見本だけ（誰がいつ教えたか・並び順を残さない）。映像はディスクに保存しない。
+- 四人麻雀と三人麻雀（`RoundSettings.players`）の両方に対応する。三麻は萬子2〜8なし・北抜きドラ・1m→9m ドラ・ツモ損あり/折半。
+- ルールは `app/logic/rules.py` の `Rules`（既定＝雀魂の段位戦）で切り替える。新しいルール差はここに項目を足し、`scorer.py`/`analyzer.py` で参照する。
+- 鳴きは `RoundSettings.melds`、カンの回数は `table_kans`（卓全体・最大4回）。ドラ表示牌は 1＋カン回数 枚まで。ドラは `scorer.py` で自前で数える（三麻・裏ドラ対応のため）。
+- 牌の一覧画像などの素材ファイルはコミットしない。初期見本は `tools/import_tile_sheet.py` で `data/templates_seed/` に入れる。
 - 本番は `127.0.0.1:8030` で uvicorn（workers=1）。nginx が https://mahjong-assist.dxc-labo.cloud から転送する。同じサーバーの他サイト（ポート 8000, 8010-8014, 8020, 8021）に触れない。
+
+- 手順やコマンドを書くときは、実行場所を必ず明記する：【PC(ubuntu26)】【Webサーバ(os3-379-22658)】【ブラウザ(GitHub)】【スマホ】（README の「実行場所の表記」参照）。
 
 ## コマンド
 - 開発サーバー: `uvicorn app.main:app --reload --port 8030`

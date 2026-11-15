@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f5132">
   <title>麻雀アシスト</title>
-  <link rel="stylesheet" href="/static/style.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
   <header class="topbar">
@@ -24,7 +24,7 @@
         <button id="cameraBtn" class="primary">カメラ開始</button>
       </div>
       <p id="camStatus" class="status">カメラを開始すると、手牌を自動で読み取ってアシストします。</p>
-      <p id="modeNote" class="note" hidden>はじめて使う牌セットは、牌の見た目を覚えさせる必要があります。手牌を映したまま、下で左から順に正しい牌を入力し「この並びで覚える」を押してください。同じ卓の誰かが覚えさせれば全員に反映されます。</p>
+      <p id="modeNote" class="note" hidden>はじめて使う牌セットは、牌の見た目を覚えさせる必要があります。<b>対局を始める前に</b>、牌を表向きに横一列に並べて映し、下で左から順に正しい牌を入力して「この並びで覚える」を押してください。覚えるのは牌1枚ずつの見た目だけで、手牌や並び順は他の人に伝わりません。</p>
     </section>
 
     <section class="card">
@@ -46,17 +46,40 @@
         <button id="teachBtn" class="primary" hidden>この並びで覚える</button>
         <button id="autoBtn" hidden>自動認識に戻す</button>
       </div>
-      <div class="dora-line">ドラ表示牌: <span id="dora" class="tiles small"></span></div>
+      <h3 class="sub">鳴き <small>ボタンを押してから、下の牌を選びます</small></h3>
+      <div class="row meld-buttons">
+        <button data-meld="pon">ポン</button>
+        <button data-meld="chi" id="chiBtn">チー</button>
+        <button data-meld="kan">明カン</button>
+        <button data-meld="ankan">暗カン</button>
+      </div>
+      <div id="melds" class="melds"></div>
 
-      <div class="target-switch" role="radiogroup">
-        <label><input type="radio" name="target" value="hand" checked> 手牌に追加</label>
-        <label><input type="radio" name="target" value="dora"> ドラ表示牌に追加</label>
+      <h3 class="sub">ドラ表示牌 <small>タップして選ぶ。カンのたびに1枚増えます</small></h3>
+      <div id="doraSlots" class="dora-slots"></div>
+      <label class="inline">この局のカン回数（全員分・最大4回）
+        <input id="tableKans" type="number" min="0" max="4" value="0" inputmode="numeric">
+      </label>
+      <p id="kanNote" class="note" hidden></p>
+      <div id="uraBox" hidden>
+        <h3 class="sub">裏ドラ表示牌 <small>リーチしてアガったときにめくる牌</small></h3>
+        <div id="uraSlots" class="dora-slots"></div>
+      </div>
+
+      <div id="pickBanner" class="pick-banner" hidden>
+        <span id="pickText"></span>
+        <button id="pickClear" hidden>外す</button>
+        <button id="pickCancel">やめる</button>
       </div>
       <div id="palette" class="palette"></div>
     </section>
 
     <section class="card">
       <h2>局の設定</h2>
+      <div class="players-switch" role="radiogroup" aria-label="人数">
+        <label><input type="radio" name="players" value="4" checked> 四人麻雀</label>
+        <label><input type="radio" name="players" value="3"> 三人麻雀（さんま）</label>
+      </div>
       <div class="settings">
         <label>自風
           <select id="seatWind">
@@ -71,7 +94,27 @@
         <label class="check"><input id="riichi" type="checkbox"> リーチ</label>
         <label class="check"><input id="tsumo" type="checkbox"> ツモ</label>
         <label class="check"><input id="ippatsu" type="checkbox"> 一発</label>
+        <label class="sanma-only" hidden>抜きドラ（北）<input id="nukidora" type="number" min="0" max="4" value="0" inputmode="numeric"></label>
       </div>
+      <p class="tip sanma-only" hidden>三人麻雀：萬子は1と9だけ。ドラ表示牌が一萬ならドラは九萬。北は抜くとドラ1（ルール設定で変更可）。</p>
+    </section>
+
+    <section class="card">
+      <details id="rulesCard">
+        <summary><h2>ルール設定 <small id="presetName">雀魂（段位戦）</small></h2></summary>
+        <label class="inline">プリセット
+          <select id="preset">
+            <option value="mahjongsoul">雀魂（段位戦）</option>
+            <option value="custom">カスタム</option>
+          </select>
+        </label>
+        <div id="ruleList" class="rule-list"></div>
+        <div class="settings">
+          <label>四麻の本場（点/本） <input id="honba4" type="number" min="0" max="1500" step="100" inputmode="numeric"></label>
+          <label>三麻の本場（点/本） <input id="honba3" type="number" min="0" max="1500" step="100" inputmode="numeric"></label>
+        </div>
+        <p class="tip">雀魂の段位戦ルール：赤ドラ各1枚（三麻は筒子・索子のみ）、喰いタン・後付けあり、一発・裏ドラ・カンドラ・カン裏あり、切り上げ満貫なし、数え役満あり、本場は四麻300点・三麻200点、三麻はチーなし・北抜きドラ・ツモ損あり。</p>
+      </details>
     </section>
 
     <section id="result" class="card result" aria-live="polite">
@@ -86,6 +129,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">鳴き（ポン・チー・カン）は今後対応予定です</footer>
-  <script src="/static/app.js?v=2"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

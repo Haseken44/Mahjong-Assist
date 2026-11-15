@@ -62,3 +62,41 @@ def test_unknown_without_templates(tmp_path):
     det = TemplateDetector(TemplateStore(tmp_path))
     dets = det.detect(table_image(HAND))
     assert len(dets) == 14 and all(d.tile is None for d in dets)
+
+
+def _sheet_image():
+    """牌一覧画像の代わり：白地に黒枠の牌を standard 配置で並べた合成画像。"""
+    import numpy as np
+
+    from tests.synth import draw_tile
+    from tools.import_tile_sheet import LAYOUTS
+
+    w, h, gap = 60, 80, 12
+    rows = LAYOUTS["standard"]
+    img = np.full((len(rows) * (h + gap) + gap, 10 * (w + gap) + gap + 40, 3), 255, np.uint8)
+    for r, labels in enumerate(rows):
+        for c, t in enumerate(labels):
+            x, y = gap + c * (w + gap), gap + r * (h + gap)
+            img[y:y + h, x:x + w] = draw_tile(t, w, h)
+            cv2.rectangle(img, (x - 3, y - 3), (x + w + 2, y + h + 2), (20, 20, 20), 3)
+    # 右端の横向きの牌（除外されること）
+    cv2.rectangle(img, (img.shape[1] - 30, 10), (img.shape[1] - 12, 200), (20, 20, 20), 3)
+    return img
+
+
+def test_import_tile_sheet(tmp_path):
+    from tools.import_tile_sheet import extract
+
+    tiles = extract(_sheet_image())
+    assert [t for t, _ in tiles][:6] == ["1m", "2m", "3m", "4m", "5m", "0m"]
+    assert len(tiles) == 37
+
+    store = TemplateStore(tmp_path / "templates")
+    for t, im in tiles:
+        store.add(t, im, seed=True)
+    assert store.kinds == 37
+    assert (tmp_path / "templates_seed" / "0p").is_dir()
+    # 初期見本だけで、卓に並べた牌が読める
+    hand = "1m 9m 0p 6p 7p 3s 4s 6s 7s 8s 5z 5z 1z".split()
+    det = TemplateDetector(TemplateStore(tmp_path / "templates"))
+    assert [d.tile for d in det.detect(table_image(hand))] == hand

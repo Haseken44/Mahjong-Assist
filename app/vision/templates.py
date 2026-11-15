@@ -1,14 +1,16 @@
 """登録した牌の見本（テンプレート）と照合して牌の種類を判定する。
 
-プレイヤーが「カメラに映っている牌を左から順に入力 → 学習」すると、切り出した牌画像が
-data/templates/<牌>/ に保存される。卓の牌セットごとに見た目が違っても、その卓の牌で学習できる。
-保存先は全プレイヤー共通なので、同じ卓の誰かが教えた結果を4人全員が使える。
+プレイヤーが「カメラに映っている牌を左から順に入力 → 学習」すると、切り出した牌1枚ずつの画像が
+data/templates/<牌の種類>/ に保存される。卓の牌セットごとに見た目が違っても、その卓の牌で学習できる。
+
+共有されるのは「この牌はこういう見た目」という牌1枚単位の見本だけで、誰が・いつ・どの並びで
+教えたか（＝手牌）は残さない（ファイル名は乱数、保存順もシャッフル）。見本は対局前に
+全種類の牌を表向きに並べて教えることを推奨する。
 """
 from __future__ import annotations
 
 import os
 import threading
-import time
 import uuid
 from pathlib import Path
 
@@ -21,7 +23,7 @@ DATA_DIR = Path(os.environ.get("MAHJONG_DATA_DIR", Path(__file__).resolve().pare
 MAX_PER_TILE = 20
 SIZE = (32, 48)  # 幅, 高さ
 COLOR_WEIGHT = 3.0
-UNKNOWN_DISTANCE = 0.75  # これより似ていなければ「？（不明）」
+UNKNOWN_DISTANCE = 1.0  # これより似ていなければ「？（不明）」
 AUG_COUNT = 8  # augment() が返す枚数
 
 _hog = cv2.HOGDescriptor(SIZE, (16, 16), (8, 8), (8, 8), 9)
@@ -77,8 +79,16 @@ def augment(tile_img: np.ndarray) -> list[np.ndarray]:
 
 
 class TemplateStore:
-    def __init__(self, root: Path = DATA_DIR / "templates"):
+    """見本の保存先は2つ。
+
+    - root（data/templates/）: プレイヤーが画面で「覚える」で教えた見本
+    - seed（data/templates_seed/）: 牌の一覧画像から tools/import_tile_sheet.py で取り込んだ初期見本。
+      写真を差し替えるときは同ツールの --replace でここだけ入れ替える。
+    """
+
+    def __init__(self, root: Path = DATA_DIR / "templates", seed: Path | None = None):
         self.root = root
+        self.seed = seed if seed is not None else root.parent / (root.name + "_seed")
         self.lock = threading.Lock()
         self.labels: list[str] = []
         self.features = np.zeros((0, 1), np.float32)
@@ -86,8 +96,10 @@ class TemplateStore:
 
     def reload(self) -> None:
         labels, feats = [], []
-        if self.root.exists():
-            for d in sorted(self.root.iterdir()):
+        for base in (self.seed, self.root):
+            if not base.exists():
+                continue
+            for d in sorted(base.iterdir()):
                 if not d.is_dir():
                     continue
                 try:
@@ -120,13 +132,14 @@ class TemplateStore:
         c = Counter(self.labels)
         return {t: n // AUG_COUNT for t, n in sorted(c.items())}
 
-    def add(self, tile: str, tile_img: np.ndarray) -> None:
+    def add(self, tile: str, tile_img: np.ndarray, seed: bool = False) -> None:
         T.validate(tile)
-        d = self.root / tile
+        d = (self.seed if seed else self.root) / tile
         d.mkdir(parents=True, exist_ok=True)
-        name = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}.png"
+        # ファイル名は乱数のみ（時刻を入れると同時に学習した牌＝手牌がまとまって分かってしまう）
+        name = f"{uuid.uuid4().hex}.png"
         cv2.imwrite(str(d / name), cv2.resize(tile_img, (SIZE[0] * 2, SIZE[1] * 2), interpolation=cv2.INTER_AREA))
-        files = sorted(d.glob("*.png"))
+        files = sorted(d.glob("*.png"), key=lambda f: f.stat().st_mtime)
         for old in files[:-MAX_PER_TILE]:
             old.unlink(missing_ok=True)
         fs = np.stack([feature(a) for a in augment(tile_img)])

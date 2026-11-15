@@ -69,31 +69,30 @@ def to_34_array(tiles: Iterable[str]) -> list[int]:
 
 
 def to_136_array(tiles: Iterable[str]) -> list[int]:
-    """手牌を136番号に変換する。赤五は各五の1枚目（ライブラリの赤ドラ番号）を使う。"""
+    """牌を136番号に変換する（入力と同じ順番で返す）。赤五は各五の1枚目（ライブラリの赤ドラ番号）を使う。"""
     tiles = list(tiles)
-    used: dict[int, list[int]] = {}
-    result: list[int] = []
-    # 赤五を先に割り当てる
-    for t in sorted(tiles, key=lambda x: 0 if is_red(x) else 1):
+    used: dict[int, set[int]] = {}
+    result: list[int | None] = [None] * len(tiles)
+    # 赤五を先に割り当て、通常の五が赤の番号を使わないようにする
+    order = sorted(range(len(tiles)), key=lambda i: 0 if is_red(tiles[i]) else 1)
+    for i in order:
+        t = tiles[i]
         idx = to_34(t)
-        copies = used.setdefault(idx, [])
+        copies = used.setdefault(idx, set())
         if is_red(t):
             if 0 in copies:
                 raise TileError(f"赤五が重複しています: {t}")
             copy = 0
         else:
             free = [c for c in range(4) if c not in copies]
-            # 通常の五は赤（copy 0）を避ける
             if idx in (4, 13, 22):
                 free = [c for c in free if c != 0] or free
             if not free:
                 raise TileError(f"同じ牌が5枚以上あります: {normalize(t)}")
             copy = free[0]
-        if len(copies) >= 4:
-            raise TileError(f"同じ牌が5枚以上あります: {normalize(t)}")
-        copies.append(copy)
-        result.append(idx * 4 + copy)
-    return result
+        copies.add(copy)
+        result[i] = idx * 4 + copy
+    return result  # type: ignore[return-value]
 
 
 def tile_to_136(tile: str, hand_136: list[int]) -> int:
@@ -106,6 +105,30 @@ def tile_to_136(tile: str, hand_136: list[int]) -> int:
         if n // 4 == target:
             return n
     raise TileError(f"アガリ牌 {tile} が手牌にありません")
+
+
+# 三人麻雀では萬子の2〜8（赤五萬を含む）を使わない
+SANMA_EXCLUDED = {f"{n}m" for n in range(2, 9)} | {"0m"}
+
+
+def tile_set(players: int) -> list[str]:
+    """使う牌の種類（34種 or 三麻の27種）。"""
+    return [t for t in ALL_TILES if players == 4 or t not in SANMA_EXCLUDED]
+
+
+def sanma_dora_from_indicator(indicator: str) -> str:
+    """三麻のドラ表示牌 → ドラ。萬子は 1m→9m→1m と1と9だけで回る。"""
+    t = normalize(indicator)
+    if t == "1m":
+        return "9m"
+    if t == "9m":
+        return "1m"
+    n, s = int(t[0]), t[1]
+    if s == "z":
+        if n <= 4:
+            return f"{n % 4 + 1}z"
+        return f"{(n - 5 + 1) % 3 + 5}z"
+    return f"{n % 9 + 1}{s}"
 
 
 def sort_tiles(tiles: Iterable[str]) -> list[str]:

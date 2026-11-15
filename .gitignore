@@ -6,3 +6,5 @@ models/*.pt
 !models/.gitkeep
 *.log
 data/
+*.png
+!app/static/*.png
