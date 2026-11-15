@@ -184,3 +184,37 @@ button.ok { background: var(--accent); color: #fff; border-color: transparent; f
 .other-pay ul { list-style: none; padding: 0; margin: 2px 0 0; font-weight: 600; }
 .dealer-switch { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
 .dealer-switch button { min-height: 38px; padding: 6px 12px; }
+
+/* ---------- スマートグラス表示 ---------- */
+.glass-btn { margin-left: auto; margin-right: 8px; min-height: 34px; padding: 4px 10px; font-size: .8rem; background: #000; color: #fff; border-color: #444; }
+/* 通常の画面は見えない所へ移す（カメラ映像の取り込みは続けるため display:none にはしない） */
+body.glasses { background: #000; overflow: hidden; }
+body.glasses .topbar, body.glasses .foot { display: none; }
+body.glasses main { position: fixed; left: -10000px; top: 0; width: 390px; pointer-events: none; }
+/* カメラ映像は小さく右下に残す（狙いを合わせる用。映像が止まらないよう画面内に置く） */
+body.glasses #viewport { position: fixed; left: auto; right: 8px; bottom: 60px; width: 96px; max-height: 30vh; z-index: 60; opacity: .55; border-radius: 6px; }
+body.glasses #viewport[hidden] { display: none !important; }
+body.glasses #cameraHint { display: none; }
+.glass { position: fixed; inset: 0; z-index: 50; background: #000; color: #f2f2f2; display: flex; flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.g-frame { flex: 1; width: 100%; max-width: calc(100vh * 16 / 9); margin: 0 auto; display: flex; flex-direction: column;
+  justify-content: center; gap: 2.2vh; padding: 3vh 3vw; cursor: pointer; }
+.g-status { color: #7a7a7a; font-size: clamp(11px, 2.4vh, 16px); text-align: center; }
+.g-hand { display: flex; flex-wrap: nowrap; justify-content: center; align-items: flex-end; gap: 0.6%; }
+.g-hand > .tile { width: calc((100% - 13 * 0.6%) / 14); max-width: 72px; height: auto; aspect-ratio: 3 / 4; border-radius: 6px; box-shadow: none; border: none; }
+.g-melds { margin-left: 2%; display: inline-flex; gap: 4px; }
+.g-melds .tile { width: 22px; height: 30px; }
+.g-empty { color: #888; font-size: clamp(14px, 3vh, 22px); }
+.g-main { text-align: center; font-weight: 800; }
+.g-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; font-size: clamp(14px, 3vh, 22px); color: #e8e8e8; }
+.g-big { font-size: clamp(18px, 4.6vh, 34px); color: #fff; }
+.g-big.ok { color: #5dff9a; }
+.g-main .tiles.small .tile { width: clamp(28px, 6vh, 46px); height: auto; aspect-ratio: 3 / 4; }
+.g-sub { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; }
+.g-hint { font-size: clamp(13px, 2.8vh, 20px); color: #bdbdbd; white-space: nowrap; }
+.g-hint.ok { color: #5dff9a; }
+.g-score { border-top: 1px solid #333; padding-top: 1.5vh; display: grid; gap: 6px; }
+.g-score .g-line { font-weight: 700; color: #ffd75e; }
+.g-tap { text-align: center; color: #555; font-size: 11px; }
+.g-controls { display: flex; gap: 8px; justify-content: center; padding: 8px; }
+.g-controls button { background: #111; color: #9a9a9a; border-color: #333; min-height: 40px; font-size: .85rem; }

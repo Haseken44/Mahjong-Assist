@@ -158,6 +158,7 @@ function renderHand() {
   $("count").textContent = `${state.hand.length}枚`;
   $("tileActions").hidden = state.selected == null;
   $("count").textContent = `${state.hand.length}枚` + (state.melds.length ? `＋鳴き${state.melds.length}つ` : "");
+  renderGlass();
   renderMelds();
   renderDora();
   $("riichi").disabled = isOpen();
@@ -547,6 +548,8 @@ function scoreCard(r, title, selected) {
 }
 
 function renderAnalysis(a) {
+  state.analysis = a;
+  renderGlass();
   ["score", "waits", "discards", "hints"].forEach((id) => $(id).replaceChildren());
   if (!a) {
     $("message").textContent = "手牌を映すか入力すると、ここに「何を切るか」「狙える役」「点数」が出ます。";
@@ -622,6 +625,116 @@ function renderAnalysis(a) {
   }
 }
 
+// ---------- スマートグラス表示 ----------
+// スマホの画面がそのままグラスに映る（ミラーリング）。黒はグラスでは透明に見えるので、背景は真っ黒にし、
+// 手牌と「何を切るか・狙える役」だけを大きく出す。点数はタップしたときだけ。端末ごとに設定を覚える。
+const GLASS_KEY = "mj-glasses";
+
+function setGlasses(on) {
+  state.glasses = on;
+  document.body.classList.toggle("glasses", on);
+  $("glassView").hidden = !on;
+  try { localStorage.setItem(GLASS_KEY, on ? "1" : "0"); } catch (e) { /* 保存できない環境 */ }
+  if (on) {
+    state.glassScore = false;
+    keepAwake(true);
+    renderGlass();
+  } else {
+    keepAwake(false);
+    drawBoxes([]);
+  }
+}
+
+// グラス表示中は画面が消えないようにする（対応ブラウザのみ）
+async function keepAwake(on) {
+  try {
+    if (on && navigator.wakeLock && !state.wakeLock) state.wakeLock = await navigator.wakeLock.request("screen");
+    if (!on && state.wakeLock) { await state.wakeLock.release(); state.wakeLock = null; }
+  } catch (e) { state.wakeLock = null; }
+}
+
+function gText(cls, text) {
+  const d = document.createElement("div");
+  d.className = cls;
+  d.textContent = text;
+  return d;
+}
+
+function renderGlass() {
+  if (!state.glasses) return;
+  const a = state.analysis;
+  // 手牌（鳴きは小さく右に）
+  const hand = $("gHand");
+  hand.replaceChildren();
+  state.hand.forEach((t) => hand.append(tileEl(t)));
+  if (state.melds.length) {
+    const m = document.createElement("span");
+    m.className = "g-melds";
+    state.melds.forEach((x) => m.append(tilesInline(x.tiles)));
+    hand.append(m);
+  }
+  if (!state.hand.length) hand.append(gText("g-empty", "手牌をカメラに映してください"));
+
+  // いちばん大事な一言：何を切るか／待ち／アガリ
+  const main = $("gMain");
+  main.replaceChildren();
+  const sub = $("gSub");
+  sub.replaceChildren();
+  const score = $("gScore");
+  score.replaceChildren();
+  if (a) {
+    if (a.scores || a.score) {
+      main.append(gText("g-big ok", "アガリ！"));
+      const sc = a.scores ? a.scores[a.scores.selected] : a.score;
+      if (sc && sc.ok) main.append(gText("g-line", sc.yaku.map((y) => y.name).join("・")));
+      fillGlassScore(score, a);
+    } else if (a.waits && a.waits.length) {
+      const line = document.createElement("div");
+      line.className = "g-line";
+      line.append(gText("g-big ok", "テンパイ　待ち"), tilesInline(a.waits.map((w) => w.tile)));
+      main.append(line);
+      fillGlassScore(score, a);
+    } else if (a.discards && a.discards.length) {
+      const best = a.discards[0];
+      const label = best.shanten === 0 ? "テンパイ" : `${best.shanten}向聴`;
+      const line = document.createElement("div");
+      line.className = "g-line";
+      line.append(tilesInline([best.discard]), gText("g-big", `を切る → ${label}（受け入れ${best.ukeire}枚）`));
+      main.append(line);
+      const tenpai = a.discards.find((o) => o.waits);
+      if (tenpai) fillGlassScore(score, { waits: tenpai.waits });
+    } else {
+      main.append(gText("g-line", a.message || a.shanten_label || ""));
+    }
+    // 狙える役（成立しているもの・近いものを3つまで）
+    (a.hints || []).slice(0, 3).forEach((h) => {
+      sub.append(gText("g-hint" + (h.distance === 0 ? " ok" : ""), `${h.distance === 0 ? "◎" : `あと${h.distance}:`} ${h.name}`));
+    });
+  }
+  if (!score.childNodes.length) score.append(gText("g-line", "点数はアガリ・テンパイのときに出ます"));
+  score.hidden = !state.glassScore;
+  $("gTap").textContent = state.glassScore ? "もう一度タップで点数を隠す" : "画面をタップすると点数を表示";
+  $("gStatus").textContent = state.locked ? "確定済み（次の手牌は「読み直す」）" : state.stream ? $("camStatus").textContent : "カメラ停止中";
+  $("gCam").textContent = state.stream ? "カメラ停止" : (state.hand.length ? "読み直す" : "カメラ開始");
+  $("gOk").hidden = !(state.stream && state.hand.length);
+}
+
+function fillGlassScore(box, a) {
+  if (a.scores) {
+    [["ロン", a.scores.ron], ["ツモ", a.scores.tsumo]].forEach(([k, r]) => {
+      if (!r || !r.ok) return box.append(gText("g-line", `${k}：${r ? r.error : "—"}`));
+      const pays = (r.pays || []).map((p) => `${p.who} ${p.points.toLocaleString()}`).join(" / ");
+      box.append(gText("g-line", `${k} ${r.total.toLocaleString()}点（${r.han}翻${r.fu ? r.fu + "符" : ""}${r.level ? " " + r.level : ""}）${pays}`));
+    });
+  } else if (a.waits) {
+    a.waits.forEach((w) => {
+      const ron = w.ron && w.ron.ok ? `ロン ${w.ron.total.toLocaleString()}` : "ロン 役なし";
+      const tsu = w.tsumo && w.tsumo.ok ? `ツモ ${w.tsumo.payment.replace(/^ツモ /, "").replace(/（.*$/, "")}` : "";
+      box.append(gText("g-line", `${tileName(w.tile)}（残り${w.remaining}）　${ron}　${tsu}${w.riichi_needed ? "　※要リーチ" : ""}`));
+    });
+  }
+}
+
 // ---------- WebSocket ----------
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -685,6 +798,7 @@ function onDetection(msg) {
   else if (msg.unknown) status.textContent = `${msg.seen}枚を読み取り中（自信のない牌 ${msg.unknown}枚は点線で表示。違っていたらタップして直せます）`;
   else status.textContent = `${msg.seen}枚を認識中`;
   if (state.locked) return;  // 「OK」で確定済み（カメラ停止の直前に届いた結果は無視）
+  if (state.glasses) setTimeout(renderGlass, 0);
   updateSteps(msg.seen > 0 && state.hand.length > 0);
   $("okBtn").hidden = !(state.stream && state.hand.length);
   if (state.manual) return;
@@ -746,6 +860,7 @@ async function toggleCamera() {
       state.stream = await openCamera(null);  // 前回のカメラが無い → 既定の背面カメラ
     }
     video.srcObject = state.stream;
+    video.play().catch(() => {});  // 明示的に再生（画面外でも止まらないように）
     setLocked(false);
     setManual(false);
     $("cameraHint").hidden = true;
@@ -816,6 +931,7 @@ async function switchCamera(deviceId, remember = true) {
     state.stream = await openCamera(null);
   }
   video.srcObject = state.stream;
+  video.play().catch(() => {});  // 明示的に再生（画面外でも止まらないように）
   if (remember) { try { localStorage.setItem(CAM_KEY, deviceId); } catch (e) { /* 無視 */ } }
   $("camSelect").value = deviceId;
   setupZoom(state.stream.getVideoTracks()[0]);
@@ -840,6 +956,7 @@ function stopCamera() {
   $("viewport").style.aspectRatio = "";
   overlay.getContext("2d").clearRect(0, 0, overlay.width, overlay.height);
   updateSteps(false);
+  renderGlass();
 }
 
 function loop(ts) {
@@ -965,6 +1082,13 @@ function init() {
   connect();
   $("cameraBtn").addEventListener("click", toggleCamera);
   $("okBtn").addEventListener("click", confirmHand);
+  $("glassBtn").addEventListener("click", () => setGlasses(true));
+  $("gExit").addEventListener("click", () => setGlasses(false));
+  $("gCam").addEventListener("click", () => toggleCamera().then(renderGlass));
+  $("gOk").addEventListener("click", () => { confirmHand(); renderGlass(); });
+  $("gFrame").addEventListener("click", () => { state.glassScore = !state.glassScore; renderGlass(); });
+  document.addEventListener("visibilitychange", () => { if (state.glasses && !document.hidden) keepAwake(true); });
+  try { if (localStorage.getItem(GLASS_KEY) === "1") setGlasses(true); } catch (e) { /* 保存できない環境 */ }
   $("camSelect").addEventListener("change", (e) => switchCamera(e.target.value));
   $("zoom").addEventListener("input", (e) => {
     const track = state.stream && state.stream.getVideoTracks()[0];
