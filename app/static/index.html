@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f5132">
   <title>麻雀アシスト</title>
-  <link rel="stylesheet" href="/static/style.css?v=6">
+  <link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
   <header class="topbar">
@@ -14,17 +14,44 @@
   </header>
 
   <main>
+    <section class="card guide" id="guide">
+      <details id="guideBox" open>
+        <summary>使い方（3ステップ）</summary>
+        <ol class="steps">
+          <li id="step1"><b>「カメラ開始」を押す</b>（下の緑のボタン）。カメラの使用を聞かれたら「許可」します。</li>
+          <li id="step2"><b>緑の枠に手牌を入れる</b>：スマホを<b>縦のまま</b>手牌の上にかざし、手牌を横一列に枠の中へ。枠の幅いっぱいに映すほど正確です。読めた牌は自動で下の「手牌」に並びます。</li>
+          <li id="step3"><b>アシストを見る</b>：「何を切るとよいか」「狙える役」「点数」が出ます。切ったあとも自動で読み直します。</li>
+        </ol>
+        <p class="tip">必要なときだけ：ドラ表示牌や鳴きは「手牌」の下のボタンで、人数・自風は「局の設定」で変えます。読み違えた牌（点線の牌）はタップして正しい牌ボタンを押すと直せます。</p>
+      </details>
+    </section>
+
     <section class="camera card">
-      <div class="viewport">
+      <div class="viewport" id="viewport">
         <video id="video" playsinline muted autoplay></video>
         <canvas id="overlay"></canvas>
-        <div id="cameraHint" class="camera-hint">「カメラ開始」を押して手牌を横一列に映してください</div>
+        <div id="cameraHint" class="camera-hint">「カメラ開始」を押して、緑の枠の中に手牌を横一列に映してください</div>
       </div>
       <div class="row">
         <button id="cameraBtn" class="primary">カメラ開始</button>
       </div>
+      <div id="camControls" class="cam-controls" hidden>
+        <label id="camSelectBox" hidden>カメラ
+          <select id="camSelect"></select>
+        </label>
+        <label id="zoomBox" hidden>ズーム（左ほど広く写る） <span id="zoomVal"></span>
+          <input id="zoom" type="range">
+        </label>
+        <div class="cam-buttons">
+          <button id="torchBtn" hidden aria-pressed="false">ライト</button>
+          <button id="focusBtn" hidden>ピント合わせ</button>
+          <button id="saveFrameBtn">いまの映像を保存</button>
+          <label class="inline-check"><input type="checkbox" id="debugChk"> 認識の詳細</label>
+        </div>
+      </div>
+      <p id="debugInfo" class="debug" hidden></p>
       <p id="camStatus" class="status">カメラを開始すると、手牌を自動で読み取ってアシストします。</p>
-      <p id="modeNote" class="note" hidden>はじめて使う牌セットは、牌の見た目を覚えさせる必要があります。<b>対局を始める前に</b>、牌を表向きに横一列に並べて映し、下で左から順に正しい牌を入力して「この並びで覚える」を押してください。覚えるのは牌1枚ずつの見た目だけで、手牌や並び順は他の人に伝わりません。</p>
+      <p id="modeNote" class="note" hidden>この牌セットの見本がまだそろっていません。牌を表向きに横一列に並べて枠の中に映し、下で左から順に正しい牌を入力して「この並びで覚える」を押してください。覚えるのは牌1枚ずつの見た目だけで、手牌や並び順は他の人に伝わりません。</p>
     </section>
 
     <section class="card">
@@ -74,7 +101,7 @@
       <div id="palette" class="palette"></div>
     </section>
 
-    <section class="card">
+    <section class="card" id="settingsCard">
       <h2>局の設定</h2>
       <div class="players-switch" role="radiogroup" aria-label="人数">
         <label><input type="radio" name="players" value="4" checked> 四人麻雀</label>
@@ -128,7 +155,7 @@
   </main>
 
   <div id="toast" class="toast" role="status"></div>
-  <footer class="foot">鳴き（ポン・チー・カン）とドラ表示牌は画面のボタンで入力します。カメラで自動的に読み取るのは手牌だけです（鳴き・ドラ表示牌の自動認識は今後対応予定）。<br>v0.3</footer>
-  <script src="/static/app.js?v=6"></script>
+  <footer class="foot">鳴き（ポン・チー・カン）とドラ表示牌は画面のボタンで入力します。カメラで自動的に読み取るのは手牌だけです（鳴き・ドラ表示牌の自動認識は今後対応予定）。<br>v0.4</footer>
+  <script src="/static/app.js?v=7"></script>
 </body>
 </html>

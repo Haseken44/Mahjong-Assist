@@ -6,7 +6,7 @@ import base64
 import cv2
 import numpy as np
 
-MAX_SIDE = 960
+MAX_SIDE = 1280
 
 
 def decode_image(data: str | bytes) -> np.ndarray | None:

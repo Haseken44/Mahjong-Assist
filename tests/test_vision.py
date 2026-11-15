@@ -146,3 +146,30 @@ def test_ui_tile_images_cover_all_kinds():
 
     d = Path(__file__).resolve().parents[1] / "app" / "static" / "tiles"
     assert {p.stem for p in d.glob("*.webp")} == set(ALL_TILES) | set(RED_TILES)
+
+
+def test_stabilizer_votes_per_position():
+    """1枚だけ毎回読み違えても、位置ごとの多数決で手牌が確定する。"""
+    from app.main import Stabilizer
+
+    st = Stabilizer()
+    base = list(HAND)
+    frames = [base, base[:5] + ["9m"] + base[6:], base, base[:2] + [None] + base[3:], base]
+    results = [st.push(f) for f in frames]
+    assert results[2] == (base, True)
+    assert results[-1] == (base, False)
+
+
+def test_frame_hints():
+    import numpy as np
+
+    from app.vision.quality import frame_hints
+
+    dark = np.full((200, 600, 3), 20, np.uint8)
+    assert frame_hints(dark, [], 14) == ["dark", "none"]
+    img = table_image(HAND, scale=0.5)
+    boxes = find_tiles(img)
+    assert "small" in frame_hints(img, boxes, 14)
+    img = table_image(HAND, scale=1.4, size=(900, 480))
+    assert frame_hints(img, find_tiles(img), 14) == []
+    assert "partial" in frame_hints(img, find_tiles(img)[:6], 14)

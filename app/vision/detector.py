@@ -63,9 +63,14 @@ class Detection:
     tile: str | None  # 判定できない牌は None
     confidence: float
     box: tuple[float, float, float, float]  # x1, y1, x2, y2 （0〜1 に正規化）
+    guess: str | None = None  # 判定できなくても一番近い牌（手牌の候補。表示では「？」）
 
     def as_dict(self) -> dict:
         return {"tile": self.tile, "confidence": round(self.confidence, 3), "box": [round(v, 4) for v in self.box]}
+
+    @property
+    def best(self) -> str | None:
+        return self.tile or self.guess
 
 
 class BaseDetector:
@@ -100,9 +105,10 @@ class TemplateDetector(BaseDetector):
         h, w = img.shape[:2]
         out = []
         for box in find_tiles(img):
-            tile, conf = self.store.classify(crop(img, box))
+            guess, conf = self.store.classify(crop(img, box), guess=True)
+            tile = guess if conf > 0 else None
             x, y, bw, bh = box
-            out.append(Detection(tile, conf, (x / w, y / h, (x + bw) / w, (y + bh) / h)))
+            out.append(Detection(tile, conf, (x / w, y / h, (x + bw) / w, (y + bh) / h), guess))
         return out
 
 

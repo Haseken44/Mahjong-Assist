@@ -51,7 +51,7 @@ function tileEl(t, opts = {}) {
   el.append(n, s);
   // 実物の牌の写真（app/static/tiles/）。読めなければ文字表示のまま。
   const img = document.createElement("img");
-  img.src = `/static/tiles/${t}.webp?v=2`;
+  img.src = `/static/tiles/${t}.webp?v=3`;
   img.alt = "";
   img.draggable = false;
   img.decoding = "async";
@@ -141,6 +141,7 @@ function renderHand() {
   state.hand.forEach((t, i) => {
     const el = tileEl(t, { button: true });
     if (i === state.selected) el.classList.add("selected");
+    if (state.unsure && state.unsure.has(i)) { el.classList.add("unsure"); el.title += "（自信なし。タップして直せます）"; }
     if (i === state.winTile || (state.winTile == null && state.hand.length === maxHand() && i === state.hand.length - 1)) el.classList.add("win");
     el.addEventListener("click", () => {
       state.selected = state.selected === i ? null : i;
@@ -562,16 +563,36 @@ function connect() {
   };
 }
 
+const HINTS = {
+  dark: "暗すぎます。明るい場所で映してください",
+  glare: "照明が反射して白く飛んでいます。スマホの角度を少し変えてください",
+  none: "牌が見つかりません。緑の枠の中に、手牌を横一列に入れてください",
+  small: "牌が小さく写っています。少し近づけるか、手牌が枠の幅いっぱいになるようにしてください",
+  blurry: "ピントが合っていません。少し離すか、画面の牌をタップしてピントを合わせてください",
+  partial: "手牌の一部しか写っていません。13〜14枚すべてが枠に入るようにしてください",
+};
+
 function onDetection(msg) {
   drawBoxes(msg.detections || []);
+  if ($("debugChk").checked) {
+    const dets = msg.detections || [];
+    const px = dets.length ? Math.round(dets.map((d) => d.box[3] - d.box[1]).sort((a, b) => a - b)[dets.length >> 1] * grab.height) : 0;
+    $("debugInfo").hidden = false;
+    $("debugInfo").textContent = `送信 ${grab.width}×${grab.height} / 検出 ${dets.length}枚 / 牌の高さ 約${px}px（40px 以上が目安） / 見本 ${state.kinds}種 / ヒント ${(msg.hints || []).join(",") || "なし"}`;
+  } else $("debugInfo").hidden = true;
   const status = $("camStatus");
-  if (!msg.seen) status.textContent = "牌が見つかりません。手牌を横一列にして、画面の中央に映してください";
-  else if (msg.unknown) status.textContent = `${msg.seen}枚を検出（判定できない牌 ${msg.unknown}枚）。下で正しい牌に直して「この並びで覚える」を押すと覚えます`;
+  const hint = (msg.hints || []).map((h) => HINTS[h]).find(Boolean);
+  status.classList.toggle("warn", Boolean(hint || msg.unknown));
+  if (hint) status.textContent = (msg.seen ? `${msg.seen}枚を検出。` : "") + hint;
+  else if (msg.unknown) status.textContent = `${msg.seen}枚を読み取り中（自信のない牌 ${msg.unknown}枚は点線で表示。違っていたらタップして直せます）`;
   else status.textContent = `${msg.seen}枚を認識中`;
+  updateSteps(msg.seen > 0 && state.hand.length > 0);
   if (state.manual) return;
   if (msg.hand && JSON.stringify(msg.hand) !== JSON.stringify(state.hand)) {
     // 手牌が変わった（プレイヤーがアシストと違う牌を切った場合も含む）→ 読み直して分析を更新
     state.hand = msg.hand.slice(0, maxHand());
+    const dets = msg.detections || [];
+    state.unsure = new Set(dets.length === msg.hand.length ? dets.map((d, i) => (d.tile ? -1 : i)).filter((i) => i >= 0) : []);
     state.selected = null;
     state.winTile = null;
     renderHand();
@@ -594,25 +615,115 @@ function setMode(mode, kinds) {
 const video = $("video");
 const overlay = $("overlay");
 const grab = document.createElement("canvas");
+const CAM_KEY = "mj-camera";
+
+// 手牌を読み取る枠（映像の中の横長の帯）。縦持ちでも横持ちでも、映像の横幅いっぱいを使う
+function guideBand() {
+  const w = video.videoWidth, h = video.videoHeight;
+  const bh = Math.min(h, Math.round(Math.max(h * 0.22, w * 0.32)));
+  return { x: Math.round(w * 0.02), y: Math.round((h - bh) / 2), w: Math.round(w * 0.96), h: bh };
+}
+
+async function openCamera(deviceId) {
+  const video = deviceId
+    ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+    : { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } };
+  return navigator.mediaDevices.getUserMedia({ video, audio: false });
+}
 
 async function toggleCamera() {
   if (state.stream) return stopCamera();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     return flash("このブラウザではカメラを使えません（HTTPS で開いてください）");
   }
+  let saved = null;
+  try { saved = localStorage.getItem(CAM_KEY); } catch (e) { /* 保存できない環境 */ }
   try {
-    state.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 960 } },
-      audio: false,
-    });
+    try {
+      state.stream = await openCamera(saved);
+    } catch (e) {
+      if (!saved) throw e;
+      state.stream = await openCamera(null);  // 前回のカメラが無い → 既定の背面カメラ
+    }
     video.srcObject = state.stream;
     $("cameraHint").hidden = true;
     $("cameraBtn").textContent = "カメラ停止";
     $("mode").classList.add("live");
+    $("camControls").hidden = false;
+    video.onloadedmetadata = fitViewport;
+    await setupCameraControls(!saved);
+    updateSteps(false);
+    $("viewport").scrollIntoView({ behavior: "smooth", block: "start" });
     requestAnimationFrame(loop);
   } catch (e) {
     flash("カメラを起動できませんでした。ブラウザの設定でカメラを許可してください");
   }
+}
+
+// 背面カメラが複数あれば選べるようにする（超広角があれば最初はそれを使う）。ズームできる機種は一番広く
+async function setupCameraControls(autoWide) {
+  const track = state.stream.getVideoTracks()[0];
+  const current = track.getSettings ? track.getSettings().deviceId : null;
+  let cams = [];
+  try {
+    cams = (await navigator.mediaDevices.enumerateDevices())
+      .filter((d) => d.kind === "videoinput" && !/front|前面|user|facetime/i.test(d.label));
+  } catch (e) { cams = []; }
+  const sel = $("camSelect");
+  sel.innerHTML = "";
+  cams.forEach((d, i) => {
+    const o = document.createElement("option");
+    o.value = d.deviceId;
+    o.textContent = d.label ? d.label.replace(/camera/i, "カメラ") : `カメラ ${i + 1}`;
+    if (/ultra ?wide|超広角/i.test(d.label)) o.textContent += "（広く写る）";
+    o.selected = d.deviceId === current;
+    sel.append(o);
+  });
+  $("camSelectBox").hidden = cams.length < 2;
+  const wide = cams.find((d) => /ultra ?wide|超広角/i.test(d.label));
+  if (autoWide && wide && wide.deviceId !== current) {
+    return switchCamera(wide.deviceId, false);
+  }
+  setupZoom(track);
+}
+
+function setupZoom(track) {
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  // ライト（対応機種のみ）
+  $("torchBtn").hidden = !caps.torch;
+  $("torchBtn").setAttribute("aria-pressed", "false");
+  // ピント合わせ（連続オートフォーカスに対応していれば使う）
+  const modes = caps.focusMode || [];
+  $("focusBtn").hidden = !modes.length;
+  if (modes.includes("continuous")) track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+  const box = $("zoomBox"), input = $("zoom");
+  if (!caps.zoom) { box.hidden = true; return; }
+  box.hidden = false;
+  input.min = caps.zoom.min; input.max = caps.zoom.max; input.step = caps.zoom.step || 0.1;
+  input.value = caps.zoom.min;  // 一番広く写す
+  $("zoomVal").textContent = `${(+input.value).toFixed(1)}倍`;
+  track.applyConstraints({ advanced: [{ zoom: +input.value }] }).catch(() => {});
+}
+
+async function switchCamera(deviceId, remember = true) {
+  if (state.stream) state.stream.getTracks().forEach((t) => t.stop());
+  try {
+    state.stream = await openCamera(deviceId);
+  } catch (e) {
+    flash("このカメラは使えませんでした");
+    state.stream = await openCamera(null);
+  }
+  video.srcObject = state.stream;
+  if (remember) { try { localStorage.setItem(CAM_KEY, deviceId); } catch (e) { /* 無視 */ } }
+  $("camSelect").value = deviceId;
+  setupZoom(state.stream.getVideoTracks()[0]);
+}
+
+// 映像の縦横比に合わせて表示枠の形を変える（縦持ちなら縦長で表示）
+function fitViewport() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (vw && vh) $("viewport").style.aspectRatio = `${vw} / ${vh}`;
+  drawBoxes([]);
 }
 
 function stopCamera() {
@@ -622,7 +733,10 @@ function stopCamera() {
   $("cameraHint").hidden = false;
   $("cameraBtn").textContent = "カメラ開始";
   $("mode").classList.remove("live");
+  $("camControls").hidden = true;
+  $("viewport").style.aspectRatio = "";
   overlay.getContext("2d").clearRect(0, 0, overlay.width, overlay.height);
+  updateSteps(false);
 }
 
 function loop(ts) {
@@ -635,22 +749,23 @@ function loop(ts) {
   requestAnimationFrame(loop);
 }
 
+// 枠の部分だけを切り出して送る（縮小しすぎないので、小さく写った牌も読みやすい）
 function sendFrame() {
-  const w = video.videoWidth, h = video.videoHeight;
-  const scale = Math.min(1, 960 / Math.max(w, h));
-  grab.width = Math.round(w * scale);
-  grab.height = Math.round(h * scale);
-  grab.getContext("2d").drawImage(video, 0, 0, grab.width, grab.height);
+  const b = guideBand();
+  const scale = Math.min(1, 1280 / b.w);
+  grab.width = Math.round(b.w * scale);
+  grab.height = Math.round(b.h * scale);
+  grab.getContext("2d").drawImage(video, b.x, b.y, b.w, b.h, 0, 0, grab.width, grab.height);
   state.waiting = true;
   grab.toBlob((blob) => {
     if (!blob || !state.ws || state.ws.readyState !== 1) { state.waiting = false; return; }
     blob.arrayBuffer().then((buf) => state.ws.send(buf));
-  }, "image/jpeg", 0.75);
+  }, "image/jpeg", 0.8);
   // 応答が来ないまま固まらないよう、一定時間で次のフレームを許可する
   setTimeout(() => { state.waiting = false; }, 3000);
 }
 
-// object-fit: contain で表示された映像の上に検出枠を描く
+// 映像の上に、読み取り枠と検出した牌の枠を描く（検出枠の座標は読み取り枠の中の 0〜1）
 function drawBoxes(dets) {
   const rect = overlay.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
@@ -660,27 +775,56 @@ function drawBoxes(dets) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, rect.width, rect.height);
   const vw = video.videoWidth, vh = video.videoHeight;
-  if (!vw || !vh) return;
+  if (!vw || !vh || !state.stream) return;
   const s = Math.min(rect.width / vw, rect.height / vh);
   const dw = vw * s, dh = vh * s, ox = (rect.width - dw) / 2, oy = (rect.height - dh) / 2;
+  const b = guideBand();
+  const gx = ox + b.x * s, gy = oy + b.y * s, gw = b.w * s, gh = b.h * s;
+  // 枠の外を暗くする
+  ctx.fillStyle = "rgba(0,0,0,.45)";
+  ctx.fillRect(ox, oy, dw, gy - oy);
+  ctx.fillRect(ox, gy + gh, dw, oy + dh - gy - gh);
+  ctx.strokeStyle = "#39ff88";
+  ctx.lineWidth = 3;
+  ctx.setLineDash([10, 6]);
+  ctx.strokeRect(gx, gy, gw, gh);
+  ctx.setLineDash([]);
+  ctx.font = "bold 13px sans-serif";
+  if (!dets.length) {
+    const t = "ここに手牌を横一列に";
+    ctx.fillStyle = "rgba(0,0,0,.6)";
+    ctx.fillRect(gx + 6, gy + 6, ctx.measureText(t).width + 10, 20);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(t, gx + 11, gy + 21);
+  }
   ctx.lineWidth = 2;
   ctx.font = "bold 12px sans-serif";
-  dets.forEach((d) => {
+  dets.forEach((d, i) => {
     const [x1, y1, x2, y2] = d.box;
-    const x = ox + x1 * dw, y = oy + y1 * dh, bw = (x2 - x1) * dw, bh = (y2 - y1) * dh;
+    const x = gx + x1 * gw, y = gy + y1 * gh, bw = (x2 - x1) * gw, bh = (y2 - y1) * gh;
     ctx.strokeStyle = d.tile ? "#39ff88" : "#ffb020";
     ctx.strokeRect(x, y, bw, bh);
-    const label = d.tile ? tileName(d.tile) : "？";
+    let label = d.tile ? tileName(d.tile) : "？";
+    if ($("debugChk").checked) label += ` ${Math.round((d.confidence || 0) * 100)}%`;
+    // 隣どうしの文字が重ならないよう、上下交互に書く
+    const ly = i % 2 ? y + bh + 16 : y;
     ctx.fillStyle = "rgba(0,0,0,.65)";
-    ctx.fillRect(x, y - 16, ctx.measureText(label).width + 6, 16);
+    ctx.fillRect(x, ly - 16, ctx.measureText(label).width + 6, 16);
     ctx.fillStyle = "#fff";
-    ctx.fillText(label, x + 3, y - 4);
+    ctx.fillText(label, x + 3, ly - 4);
   });
+}
+
+// 使い方の「いまどのステップか」を強調する
+function updateSteps(recognized) {
+  const step = !state.stream ? 1 : recognized ? 3 : 2;
+  [1, 2, 3].forEach((i) => $(`step${i}`).classList.toggle("now", i === step));
 }
 
 // 手で修正中は自動更新を止める。「自動に戻す」で再開
 function setManual(v) {
   state.manual = v;
+  if (v) state.unsure = null;
   $("autoBtn").hidden = !v;
   $("teachBtn").hidden = !(v && state.mode === "template");
   $("manualBadge").hidden = !v;
@@ -697,6 +841,52 @@ function init() {
   renderHand();
   connect();
   $("cameraBtn").addEventListener("click", toggleCamera);
+  $("camSelect").addEventListener("change", (e) => switchCamera(e.target.value));
+  $("zoom").addEventListener("input", (e) => {
+    const track = state.stream && state.stream.getVideoTracks()[0];
+    $("zoomVal").textContent = `${(+e.target.value).toFixed(1)}倍`;
+    if (track) track.applyConstraints({ advanced: [{ zoom: +e.target.value }] }).catch(() => {});
+  });
+  window.addEventListener("resize", () => drawBoxes([]));
+  $("torchBtn").addEventListener("click", () => {
+    const track = state.stream && state.stream.getVideoTracks()[0];
+    if (!track) return;
+    const on = $("torchBtn").getAttribute("aria-pressed") !== "true";
+    track.applyConstraints({ advanced: [{ torch: on }] })
+      .then(() => $("torchBtn").setAttribute("aria-pressed", String(on)))
+      .catch(() => flash("この機種ではライトを使えませんでした"));
+  });
+  $("focusBtn").addEventListener("click", () => {
+    const track = state.stream && state.stream.getVideoTracks()[0];
+    if (!track) return;
+    // 一度だけピントを合わせ直し、そのあと連続オートフォーカスに戻す
+    track.applyConstraints({ advanced: [{ focusMode: "single-shot" }] })
+      .catch(() => {})
+      .finally(() => setTimeout(() => track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {}), 800));
+    flash("ピントを合わせ直しました", false);
+  });
+  // 読み取り枠の映像をそのまま画像で保存（うまく読めないときに、開発者に送って調べてもらう用。サーバーには保存しない）
+  $("saveFrameBtn").addEventListener("click", () => {
+    if (!state.stream || !video.videoWidth) return flash("カメラを開始してから押してください");
+    const b = guideBand();
+    const c = document.createElement("canvas");
+    c.width = b.w; c.height = b.h;
+    c.getContext("2d").drawImage(video, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+    c.toBlob((blob) => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `mahjong-frame-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      flash("画像を保存しました（スマホの写真またはダウンロードに入ります）", false);
+    }, "image/jpeg", 0.92);
+  });
+  updateSteps(false);
+  try {
+    const box = $("guideBox");
+    if (localStorage.getItem("mj-guide-closed") === "1") box.open = false;
+    box.addEventListener("toggle", () => localStorage.setItem("mj-guide-closed", box.open ? "0" : "1"));
+  } catch (e) { /* 保存できない環境 */ }
   $("autoBtn").addEventListener("click", () => { setManual(false); flash("自動認識に戻しました", false); });
   $("teachBtn").addEventListener("click", () => {
     if (!state.stream) return flash("カメラを開始して、入力した手牌と同じ並びを映してください");
@@ -763,5 +953,38 @@ function init() {
   document.querySelectorAll("input[name=players]").forEach((el) =>
     el.addEventListener("change", () => { applyPlayers(); changed(); }));
   window.addEventListener("resize", () => drawBoxes([]));
+  $("torchBtn").addEventListener("click", () => {
+    const track = state.stream && state.stream.getVideoTracks()[0];
+    if (!track) return;
+    const on = $("torchBtn").getAttribute("aria-pressed") !== "true";
+    track.applyConstraints({ advanced: [{ torch: on }] })
+      .then(() => $("torchBtn").setAttribute("aria-pressed", String(on)))
+      .catch(() => flash("この機種ではライトを使えませんでした"));
+  });
+  $("focusBtn").addEventListener("click", () => {
+    const track = state.stream && state.stream.getVideoTracks()[0];
+    if (!track) return;
+    // 一度だけピントを合わせ直し、そのあと連続オートフォーカスに戻す
+    track.applyConstraints({ advanced: [{ focusMode: "single-shot" }] })
+      .catch(() => {})
+      .finally(() => setTimeout(() => track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {}), 800));
+    flash("ピントを合わせ直しました", false);
+  });
+  // 読み取り枠の映像をそのまま画像で保存（うまく読めないときに、開発者に送って調べてもらう用。サーバーには保存しない）
+  $("saveFrameBtn").addEventListener("click", () => {
+    if (!state.stream || !video.videoWidth) return flash("カメラを開始してから押してください");
+    const b = guideBand();
+    const c = document.createElement("canvas");
+    c.width = b.w; c.height = b.h;
+    c.getContext("2d").drawImage(video, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+    c.toBlob((blob) => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `mahjong-frame-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      flash("画像を保存しました（スマホの写真またはダウンロードに入ります）", false);
+    }, "image/jpeg", 0.92);
+  });
 }
 init();
