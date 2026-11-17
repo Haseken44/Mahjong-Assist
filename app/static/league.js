@@ -19,6 +19,7 @@ const ui = {
   formKey: null,                            // 入力欄を作り直すかの目印
   winner: null,                             // この局でアガった人
   loser: null,                              // ロンで振り込んだ人（必ず選ぶ）
+  editHand: null,                           // 直している局の番号（0から）。null は新しく記録
   reg: null,                                // 登録ダイアログの状態
   edit: null,                               // オーナーが編集中の大会 {tid, name, blocks, sel, entries, pick, nb}
 };
@@ -458,6 +459,7 @@ function renderGameDetail(g) {
     ui.formKey = key;
     ui.winner = null;
     ui.loser = null;
+    ui.editHand = null;
     const rc = $("hRiichi");
     rc.replaceChildren();
     const dl = $("hDeltas");
@@ -489,6 +491,15 @@ function renderGameDetail(g) {
   const canStart = !g.hands.length && !g.finished && (!g.tournament || !!ownerKey(g.tournament));
   $("gStartBox").hidden = !canStart;
   if (canStart && !$("gStart").matches(":focus")) $("gStart").value = g.start;
+  if (ui.editHand != null && (g.finished || ui.editHand >= g.hands.length)) ui.editHand = null;
+  const editing = ui.editHand != null;
+  $("gEntry").classList.toggle("editing", editing);
+  $("hTitle").textContent = editing ? `${ui.editHand + 1}局目の記録を直す` : "この局の結果を記録";
+  $("hEditBar").hidden = !editing;
+  if (editing) $("hEditBar").textContent = "直したい所（ロンの相手・点数など）を変えて「この局を直す」を押してください。持ち点と個人成績は自動で数え直します。";
+  $("hSave").textContent = editing ? "この局を直す" : "記録する";
+  $("hCancel").hidden = !editing;
+  $("hDelete").hidden = !editing;
   $("gEntry").hidden = g.finished;
   $("gDealer").disabled = g.finished;
   $("gUndo").hidden = g.finished;
@@ -499,8 +510,8 @@ function renderGameDetail(g) {
   $("gHandCount").textContent = `${g.hands.length}局`;
   const hl = $("gHands");
   hl.replaceChildren();
-  g.hands.forEach((h) => {
-    const li = el("li");
+  g.hands.forEach((h, idx) => {
+    const li = el("li", idx === ui.editHand ? "fixing" : "");
     let text;
     if (h.kind === "ron") text = `${player(h.winner).name} が ${player(h.loser).name} からロン`;
     else if (h.kind === "tsumo") text = `${player(h.winner).name} のツモ`;
@@ -509,6 +520,8 @@ function renderGameDetail(g) {
     Object.entries(h.deltas).filter(([, d]) => d).forEach(([pid, d]) => {
       li.append(el("span", d > 0 ? "plus" : "minus", `${player(pid).name}${fmt(d)}`));
     });
+    if (h.edited) li.append(el("span", "edited", "（修正済み）"));
+    if (!g.finished) li.append(btn(idx === ui.editHand ? "修正中" : "直す", () => startHandEdit(g, idx), "fix"));
     hl.append(li);
   });
   if (g.finished && g.ranks) {
@@ -540,12 +553,71 @@ function renderWhoPick(g) {
   make($("hLoser"), (pid) => ui.loser === pid, (pid) => pid === ui.winner, (pid) => { ui.loser = ui.loser === pid ? null : pid; });
 }
 
+// 直している局ならその局の親、そうでなければいまの親
+function dealerSeat(g) {
+  const h = ui.editHand != null && g.hands[ui.editHand];
+  return h ? h.dealer_before : g.dealer;
+}
+
+function clearEntry() {
+  ["hPoints", "hChild", "hDealerPay", "hNote"].forEach((id) => ($(id).value = ""));
+  ui.winner = null;
+  ui.loser = null;
+  document.querySelectorAll("#hRiichi input, #hDeltas input").forEach((i) => { if (i.type === "checkbox") i.checked = false; else i.value = ""; });
+}
+
+// 記録した局を入力欄に戻して直す
+function startHandEdit(g, idx) {
+  if (ui.editHand === idx) { cancelHandEdit(); return; }
+  const h = g.hands[idx];
+  clearEntry();
+  ui.editHand = idx;
+  document.querySelector(`input[name=hkind][value=${h.kind}]`).checked = true;
+  ui.winner = h.winner;
+  ui.loser = h.loser;
+  const pays = Object.fromEntries(Object.entries(h.deltas).map(([pid, d]) => [pid, -d]));
+  if (h.kind === "ron") $("hPoints").value = h.points ?? pays[h.loser];
+  if (h.kind === "tsumo") {
+    const dealerId = g.players[h.dealer_before];
+    const others = g.players.filter((pid) => pid !== h.winner && pid !== dealerId);
+    $("hChild").value = h.pay_child ?? (others.length ? pays[others[0]] : pays[dealerId]);
+    $("hDealerPay").value = h.winner === dealerId ? "" : (h.pay_dealer ?? pays[dealerId]);
+  }
+  (h.riichi || []).forEach((pid) => {
+    const c = document.querySelector(`#hRiichi input[value="${pid}"]`);
+    if (c) c.checked = true;
+  });
+  if (h.kind === "other") {
+    document.querySelectorAll("#hDeltas input").forEach((i) => (i.value = h.deltas[i.dataset.pid] || ""));
+    $("hNote").value = h.note || "";
+  }
+  renderGameDetail(g);
+  $("gEntry").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function cancelHandEdit() {
+  ui.editHand = null;
+  clearEntry();
+  const g = game(ui.game);
+  if (g) renderGameDetail(g);
+}
+$("hCancel").addEventListener("click", cancelHandEdit);
+$("hDelete").addEventListener("click", async () => {
+  const i = ui.editHand;
+  if (i == null || !confirm(`${i + 1}局目の記録を削除しますか？（持ち点と個人成績は数え直します）`)) return;
+  try {
+    await api("DELETE", `/api/league/games/${ui.game}/hands/${i}`);
+    cancelHandEdit();
+    flash(`${i + 1}局目の記録を削除しました`, false);
+    await refresh();
+  } catch (e) { flash(e.message); }
+});
+
 function updateKind() {
   const k = hkind();
   document.querySelectorAll("#gEntry [class*=kind-]").forEach((e) => (e.hidden = !e.classList.contains("kind-" + k)));
   const g = ui.game && game(ui.game);
   if (!g) return;
-  const winnerIsDealer = ui.winner === g.players[g.dealer];
+  const winnerIsDealer = ui.winner === g.players[dealerSeat(g)];
   $("hDealerBox").hidden = winnerIsDealer || k !== "tsumo";
   $("hChildBox").firstChild.textContent = winnerIsDealer ? "全員の支払い（〇〇点オール） " : "子の支払い（1人あたり） ";
 }
@@ -589,12 +661,14 @@ $("hSave").addEventListener("click", async () => {
     }
   }
   try {
-    await api("POST", `/api/league/games/${ui.game}/hands`, body);
-    ["hPoints", "hChild", "hDealerPay", "hNote"].forEach((id) => ($(id).value = ""));
-    ui.winner = null;
-    ui.loser = null;
-    document.querySelectorAll("#hRiichi input, #hDeltas input").forEach((i) => { if (i.type === "checkbox") i.checked = false; else i.value = ""; });
-    flash("記録しました。勝ち点・マイナス点数も更新されました", false);
+    const fixing = ui.editHand;
+    if (fixing != null) await api("PUT", `/api/league/games/${ui.game}/hands/${fixing}`, body);
+    else await api("POST", `/api/league/games/${ui.game}/hands`, body);
+    clearEntry();
+    ui.editHand = null;
+    flash(fixing != null
+      ? `${fixing + 1}局目を直しました。持ち点と個人成績も数え直しました`
+      : "記録しました。間違えたときは下の「記録」の「直す」で直せます", false);
     await refresh();
   } catch (e) { flash(e.message); }
 });

@@ -127,3 +127,16 @@ dialog.sheet h2 { margin-top: 0; }
 .owner-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px; border-radius: 10px; background: var(--bg); margin-bottom: 6px; }
 .owner-line .lbl { font-size: .8rem; color: var(--muted); }
 .owner-line .small-btn { margin-left: auto; }
+
+/* 記録した局を直す */
+.edit-bar { margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; background: #fff3cd; color: #5c4400; font-size: .85rem; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .edit-bar { background: #3a3110; color: #f4d77a; } }
+#gEntry.editing { border-color: #d4a017; box-shadow: 0 0 0 2px #d4a017 inset; }
+button.danger { color: var(--accent); border-color: var(--accent); }
+.hands li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.hands li .fix { margin-left: auto; min-height: 32px; padding: 2px 10px; font-size: .8rem; }
+.hands li.fixing { background: #fff3cd; border-radius: 6px; }
+@media (prefers-color-scheme: dark) { .hands li.fixing { background: #3a3110; } }
+.hands .edited { font-size: .72rem; color: var(--muted); }
+.hands li span + span { margin-left: 0; }
+#gEntry .row #hSave { flex: 2; }
