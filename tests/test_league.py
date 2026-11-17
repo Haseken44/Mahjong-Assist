@@ -638,3 +638,45 @@ def test_public_seiseki_pages_are_read_only(tmp_path, monkeypatch):
     assert "attachment" in m.headers["content-disposition"] and "filename*=UTF-8''" in m.headers["content-disposition"]
     assert client.get("/api/league/export.md").status_code == 200
     assert client.get("/api/league/tournaments/nothing/export.md").status_code == 404
+
+
+def test_delete_started_tournament_removes_its_scores(tmp_path, monkeypatch):
+    import app.league_api as api
+    import app.league_public as pub
+    s, t, key, _ = _played_store(tmp_path)
+    ids = list(t["players"])
+    # ほかの大会と、大会以外の対局（こちらの成績は残る）
+    t2, k2 = s.add_tournament("冬の大会", ids[:3], 1, owner_player=ids[0])
+    s.start_tournament(t2["id"], k2)
+    g2 = s.data["games"][t2["final_game"]]
+    s.add_hand(g2["id"], {"kind": "tsumo", "winner": g2["players"][0], "pay_child": 1000, "pay_dealer": 2000})
+    free = s.add_game(ids[:3], "練習")
+    s.add_hand(free["id"], {"kind": "ron", "winner": ids[2], "loser": ids[1], "points": 3900})
+    other = s.stats(list(s._tour_games(t2)) + [s.data["games"][free["id"]]])
+    tour_gids = set(t["block_games"]) | {t["final_game"]}
+
+    with pytest.raises(LeagueError):
+        s.delete_tournament(t["id"], key)  # 始まった大会は確認がいる
+    with pytest.raises(Forbidden):
+        s.delete_tournament(t["id"], k2, True)  # ほかの大会のオーナーは消せない
+    r = s.delete_tournament(t["id"], key, True)
+    assert r["games"] == len(tour_gids) and (tmp_path / r["backup"]).exists()
+    assert t["id"] not in s.data["tournaments"] and not tour_gids & set(s.data["games"])
+    st = s.stats()
+    for pid in ids:  # 通算成績は、残った大会と大会以外の対局の分だけ
+        assert st[pid]["net"] == other[pid]["net"] and st[pid]["games"] == other[pid]["games"]
+        assert all(h["id"] != t["id"] for h in s.player_history(pid)["tournaments"])
+    assert len(s.data["players"]) == len(ids)  # プレイヤー登録は残る
+
+    # API：「削除」の入力が必要。公開ページからも消える
+    monkeypatch.setattr(api, "store", s)
+    monkeypatch.setattr(pub, "store", s)
+    client = TestClient(app)
+    hdr = {"X-Owner-Key": k2}
+    assert client.post(f"/api/league/tournaments/{t2['id']}/delete", json={"confirm": "はい"}, headers=hdr).status_code == 400
+    assert client.post(f"/api/league/tournaments/{t2['id']}/delete", json={"confirm": "削除"}).status_code == 403
+    assert client.post(f"/api/league/tournaments/{t2['id']}/delete", json={"confirm": "削除"}, headers=hdr).status_code == 200
+    assert client.get(f"/seiseki/{t2['id']}").status_code == 404
+    page = client.get("/seiseki/").text
+    assert "冬の大会" not in page and "秋の大会" not in page
+    assert s.stats()[ids[2]]["net"] == 3900  # 大会以外の対局の分だけ残る
