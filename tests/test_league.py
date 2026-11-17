@@ -424,3 +424,55 @@ def test_reset_api_needs_confirm_word(tmp_path, monkeypatch):
     assert r.status_code == 200
     s = client.get("/api/league").json()
     assert s["players"] == [] and s["tournaments"] == []
+
+
+def test_tournament_standings_and_player_history(store):
+    ids = _players(store, 5)
+    free = store.add_game(ids[:2], "練習")
+    store.add_hand(free["id"], {"kind": "ron", "winner": free["players"][1], "loser": free["players"][0], "points": 32000})
+    t, key = store.add_tournament("一回目", ids, 2)
+    store.start_tournament(t["id"], key)
+    for gid in t["block_games"]:
+        g = store.data["games"][gid]
+        w, l = g["players"][1], g["players"][0]
+        store.add_hand(gid, {"kind": "ron", "winner": w, "loser": l, "points": 32000 if len(g["players"]) == 2 else 8000})
+        store.finish_game(gid)
+    store.start_final(t["id"], key)
+    final = store.data["games"][t["final_game"]]
+    k, other = final["players"][1], final["players"][0]
+    store.add_hand(final["id"], {"kind": "ron", "winner": k, "loser": other, "points": 32000})
+    store.finish_game(final["id"])
+    rows = store.snapshot()["tournaments"][0]["standings"]
+    assert rows[0]["id"] == k and rows[0]["result"] == "👑 キング" and len(rows) == 5
+    assert {r["id"]: r["result"] for r in rows}[other] == "決勝2位"
+    # 大会ごとの成績は大会の対局だけ（練習の対局は入らない）
+    t_sum = sum(r["net"] for r in rows)
+    assert t_sum == 0
+    # 2回目の大会は0から
+    t2, key2 = store.add_tournament("二回目", ids[:3], 1)
+    rows2 = next(x for x in store.snapshot()["tournaments"] if x["id"] == t2["id"])["standings"]
+    assert all(r["net"] == 0 and r["hands"] == 0 for r in rows2)
+    # プレイヤーの成績は大会が終わっても見られる（通算＝大会＋大会以外）
+    h = store.player_history(k)
+    one = next(x for x in h["tournaments"] if x["name"] == "一回目")
+    assert one["result"] == "👑 キング" and h["stats"]["kings"] == 1
+    assert h["stats"]["net"] == sum(x["stats"]["net"] for x in h["tournaments"]) + h["free"]["net"]
+    with pytest.raises(LeagueError):
+        store.player_history("nobody")
+
+
+def test_standings_order_final_before_blocks(store):
+    ids = _players(store, 5)
+    t, key = store.add_tournament("順番", ids, 2)
+    store.start_tournament(t["id"], key)
+    for gid in t["block_games"]:
+        g = store.data["games"][gid]
+        store.add_hand(gid, {"kind": "ron", "winner": g["players"][1], "loser": g["players"][0],
+                             "points": 32000 if len(g["players"]) == 2 else 8000})
+        store.finish_game(gid)
+    store.start_final(t["id"], key)
+    f = store.data["games"][t["final_game"]]
+    store.add_hand(f["id"], {"kind": "ron", "winner": f["players"][1], "loser": f["players"][0], "points": 32000})
+    store.finish_game(f["id"])
+    res = [r["result"] for r in store.tour_standings(t)]
+    assert res[:2] == ["👑 キング", "決勝2位"] and all("ブロック" in x for x in res[2:])

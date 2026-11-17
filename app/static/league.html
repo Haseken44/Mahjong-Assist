@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
   <link rel="stylesheet" href="/static/style.css?v=13">
-  <link rel="stylesheet" href="/static/league.css?v=9">
+  <link rel="stylesheet" href="/static/league.css?v=10">
 </head>
 <body>
   <header class="topbar">
@@ -149,7 +149,8 @@
     <!-- ===== 成績 ===== -->
     <section id="tab-rank" class="tab" hidden>
       <div class="card">
-        <h2>個人成績 <small>1局ごとに自動で更新</small></h2>
+        <h2>通算成績 <small>大会が終わっても残ります・1局ごとに更新</small></h2>
+        <p class="tip">名前をタップすると、その人の大会ごとの履歴が見られます。大会ごとの成績表は「大会」タブの各大会にあります（その大会の対局だけを数えるので、新しい大会は0から始まります）。</p>
         <p class="tip"><b>勝ち点</b>：アガリやリーチ棒で受け取った点の合計。<b>マイナス点数</b>：振り込み（放銃）やツモられで払った点の合計。<b>合計</b>＝勝ち点＋マイナス点数。対局中の局も含みます。</p>
         <div class="table-wrap">
           <table class="ranking">
@@ -214,6 +215,19 @@
     <ul id="yakumanList" class="yakuman-list"></ul>
   </dialog>
 
+  <dialog id="historyDialog" class="sheet">
+    <div class="section-head">
+      <div id="historyHead" class="history-head"></div>
+      <button type="button" id="historyClose" class="small-btn">閉じる</button>
+    </div>
+    <h3 class="sub">通算成績</h3>
+    <div id="historyTotal" class="stat-grid"></div>
+    <h3 class="sub">大会ごとの履歴</h3>
+    <ul id="historyTours" class="history-list"></ul>
+    <h3 class="sub">大会以外の対局</h3>
+    <p id="historyFree" class="tip"></p>
+  </dialog>
+
   <dialog id="resetDialog" class="sheet">
     <form method="dialog" id="resetForm">
       <h2>リセットしますか？</h2>
@@ -232,6 +246,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=8"></script>
+  <script src="/static/league.js?v=9"></script>
 </body>
 </html>

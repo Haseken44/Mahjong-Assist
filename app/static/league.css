@@ -171,3 +171,21 @@ button:disabled.danger { opacity: .45; }
 .past-tours .game-item { width: 100%; margin-top: 8px; }
 .past-tours .game-item.on { border-color: var(--accent); }
 .tour-top > button { flex: 0 0 auto; }
+
+/* 大会ごとの成績・プレイヤーの成績 */
+.standings .ranking td.result { text-align: left; font-size: .78rem; color: var(--muted); white-space: normal; }
+.standings .ranking td.result span { display: block; color: var(--ink); font-weight: 600; }
+.standings .ranking td.result small { font-size: .7rem; }
+.standings .ranking th:nth-child(3) { text-align: left; }
+.ranking tbody tr { cursor: pointer; }
+.history-head { display: flex; align-items: center; gap: 10px; }
+.history-head h2 { margin: 0; }
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.stat-grid .stat { display: grid; gap: 2px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; text-align: center; }
+.stat-grid .k { font-size: .72rem; color: var(--muted); }
+.stat-grid .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.history-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.history-list li { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.history-list .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.history-list .line { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: .82rem; color: var(--muted); }
+.history-list .result { font-weight: 700; color: var(--ink); }

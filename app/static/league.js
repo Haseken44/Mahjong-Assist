@@ -344,6 +344,7 @@ function tourCard(t) {
     }
   });
   card.append(blocks);
+  if (t.status !== "setup") card.append(standingsTable(t));
 
   const row = el("div", "row");
   if (owner && t.status === "setup") {
@@ -378,6 +379,34 @@ function tourCard(t) {
   if (!owner && t.status === "setup") card.append(el("p", "tip", "オーナーが「大会開始」を押すと、各卓の点数表ができます。"));
   if (!owner && t.status === "blocks") card.append(el("p", "tip", "全ブロックが終わったら、オーナーが決勝を始めます。"));
   return card;
+}
+
+// 大会ごとの成績表（その大会の対局だけ。新しい大会は0から始まる）
+function standingsTable(t) {
+  const box = el("div", "standings");
+  box.append(el("h3", "sub", t.status === "done" ? "この大会の成績（大会終了で確定）" : "この大会の成績（1局ごとに更新）"));
+  const wrap = el("div", "table-wrap");
+  const table = el("table", "ranking");
+  const head = el("tr");
+  ["#", "プレイヤー", "結果", "合計"].forEach((h) => head.append(el("th", null, h)));
+  const thead = el("thead");
+  thead.append(head);
+  const body = el("tbody");
+  (t.standings || []).forEach((r, i) => {
+    const tr = el("tr");
+    const who = el("td");
+    who.append(whoEl(r.id));
+    const res = el("td", "result");
+    res.append(el("span", null, r.result), el("small", null, `勝ち点 ${pts(r.plus)}・マイナス ${pts(r.minus)}`));
+    tr.append(el("td", null, String(i + 1)), who, res,
+      el("td", r.net > 0 ? "plus" : r.net < 0 ? "minus" : "", fmt(r.net)));
+    tr.addEventListener("click", () => openHistory(r.id));
+    body.append(tr);
+  });
+  table.append(thead, body);
+  wrap.append(table);
+  box.append(wrap, el("p", "tip", "名前をタップすると、その人の通算成績と大会ごとの履歴が見られます。"));
+  return box;
 }
 
 function btn(text, onClick, cls = "") {
@@ -761,6 +790,7 @@ function renderRank() {
       el("td", s.plus ? "plus" : "", pts(s.plus)), el("td", s.minus ? "minus" : "", pts(s.minus)),
       el("td", s.net > 0 ? "plus" : s.net < 0 ? "minus" : "", fmt(s.net)),
       el("td", null, String(s.games)), el("td", null, String(s.tops)));
+    tr.addEventListener("click", () => openHistory(p.id));
     body.append(tr);
   });
   if (!ui.data.players.length) {
@@ -771,6 +801,50 @@ function renderRank() {
     body.append(tr);
   }
 }
+
+// ---------- プレイヤーの成績（通算・大会ごとの履歴） ----------
+async function openHistory(pid) {
+  let h;
+  try {
+    h = await api("GET", `/api/league/players/${pid}/history`);
+  } catch (e) { flash(e.message); return; }
+  const p = player(pid);
+  const head = $("historyHead");
+  head.replaceChildren(avatarEl(p, "big"), el("h2", null, p.name));
+  const s = h.stats;
+  const grid = $("historyTotal");
+  grid.replaceChildren();
+  [["合計", fmt(s.net), s.net > 0 ? "plus" : s.net < 0 ? "minus" : ""], ["勝ち点", pts(s.plus), "plus"], ["マイナス", pts(s.minus), "minus"],
+    ["対局", String(s.games)], ["トップ", String(s.tops)], ["平均順位", s.avg_rank == null ? "—" : s.avg_rank.toFixed(2)],
+    ["アガリ", `${s.wins}回`], ["放銃", `${s.deal_ins}回`], ["キング", s.kings ? "👑".repeat(Math.min(5, s.kings)) + ` ${s.kings}回` : "0回"],
+  ].forEach(([k, v, cls]) => {
+    const c = el("div", "stat");
+    c.append(el("span", "k", k), el("span", "v " + (cls || ""), v));
+    grid.append(c);
+  });
+  const list = $("historyTours");
+  list.replaceChildren();
+  if (!h.tournaments.length) list.append(el("li", "tip", "まだ大会に出ていません。"));
+  h.tournaments.forEach((t) => {
+    const li = el("li");
+    const top = el("div", "top");
+    top.append(el("b", null, t.name), el("span", "state-tag " + (t.status === "done" ? "done" : t.status === "setup" ? "" : "live"),
+      t.status === "done" ? (t.ended_early ? "途中で終了" : "終了") : t.status === "setup" ? "開始前" : "開催中"));
+    const d = new Date(t.created * 1000);
+    const line = el("div", "line");
+    line.append(el("span", "result", t.result), el("span", null, `${d.getMonth() + 1}/${d.getDate()}・${t.players}人`),
+      el("span", t.stats.net > 0 ? "plus" : t.stats.net < 0 ? "minus" : "", `合計 ${fmt(t.stats.net)}`),
+      el("span", null, `勝ち点 ${pts(t.stats.plus)}・マイナス ${pts(t.stats.minus)}`));
+    li.append(top, line);
+    list.append(li);
+  });
+  const f = h.free;
+  $("historyFree").textContent = f.games
+    ? `${f.games}対局・合計 ${fmt(f.net)}（勝ち点 ${pts(f.plus)}・マイナス ${pts(f.minus)}）`
+    : "まだありません。";
+  $("historyDialog").showModal();
+}
+$("historyClose").addEventListener("click", () => $("historyDialog").close());
 
 // ---------- プレイヤー ----------
 function renderPlayers() {
@@ -1164,5 +1238,5 @@ $("yakumanClose").addEventListener("click", () => $("yakumanDialog").close());
 takeOwnerLink();
 refresh();
 // 他の卓の点数も随時反映（画面を見ているときだけ）
-setInterval(() => { if (!document.hidden && !$("regDialog").open && !$("yakumanDialog").open && !$("resetDialog").open && !ui.edit) refresh(); }, POLL_MS);
+setInterval(() => { if (!document.hidden && !$("regDialog").open && !$("yakumanDialog").open && !$("resetDialog").open && !$("historyDialog").open && !ui.edit) refresh(); }, POLL_MS);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
