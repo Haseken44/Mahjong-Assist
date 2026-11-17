@@ -549,6 +549,19 @@ class LeagueStore:
         sp = sp or {}
         return {str(n): check_start(sp.get(str(n), sp.get(n, START_POINTS[n]))) for n in (4, 3, 2)}
 
+    @staticmethod
+    def _staff_name(name: str | None) -> str:
+        """参加しない運営者（オーナー）の名前。プレイヤー登録はしないので、組み分け・成績には入らない。"""
+        return " ".join((name or "").split())[:16] or "運営"
+
+    def _sync_owner(self, t: dict) -> None:
+        # 参加者のオーナーが参加者から外れたら、運営だけのオーナーとして残す（大会の操作はそのままできる）
+        pid = t.get("owner_player")
+        if pid and pid not in t["players"]:
+            p = self.data["players"].get(pid)
+            t["owner_player"] = None
+            t["owner_name"] = self._staff_name(p["name"] if p else None)
+
     def _unique_name(self, name: str | None, exclude: str | None = None) -> str:
         """大会は複数開けるので、名前がかぶったら（2）（3）…を付けて見分けられるようにする。"""
         base = " ".join((name or "").split())[:30] or "はせけん麻雀大会"
@@ -559,11 +572,18 @@ class LeagueStore:
         return out
 
     def add_tournament(self, name: str, player_ids: list[str], blocks: int,
-                       start_points: dict | None = None, owner_player: str | None = None) -> tuple[dict, str]:
+                       start_points: dict | None = None, owner_player: str | None = None,
+                       owner_name: str | None = None) -> tuple[dict, str]:
+        """大会を作る。オーナーは参加者から選ぶ（owner_player）か、参加しない運営者の名前（owner_name）にする。"""
         with self.lock:
             start_points = self._check_start_points(start_points)
             if owner_player:
                 self._player(owner_player)
+                if owner_player not in player_ids:
+                    raise LeagueError("オーナーは参加者から選ぶか、「運営だけ（参加しない）」にしてください")
+                owner_name = None
+            else:
+                owner_name = self._staff_name(owner_name) if owner_name is not None else None
             name = self._unique_name(name)
             if len(set(player_ids)) != len(player_ids):
                 raise LeagueError("同じプレイヤーが2回選ばれています")
@@ -587,7 +607,8 @@ class LeagueStore:
                 "status": "setup",  # setup → blocks → final → done
                 "king": None,
                 "start_points": start_points,       # 開始前に決める持ち点 {"4": 25000, "3": 35000}
-                "owner_player": owner_player or None,  # オーナーのプレイヤー（🇯🇵の旗を立てる）
+                "owner_player": owner_player or None,  # 参加者のオーナー（🇯🇵の旗を立てる）
+                "owner_name": owner_name,              # 参加しない運営だけのオーナーの名前（PC で運営するときなど）
                 "owner": _hash(key),
                 "created": int(time.time()),
             }
@@ -622,8 +643,10 @@ class LeagueStore:
 
     def edit_tournament(self, tid: str, key: str | None, name: str | None = None,
                         blocks: list[list[str]] | None = None, start_points: dict | None = None,
-                        owner_player: str | None = None) -> dict:
+                        owner_player: str | None = None, owner_name: str | None = None) -> dict:
         """オーナーが大会を編集する。
+
+        - オーナー：参加者の誰か（owner_player）か、参加しない運営者（owner_player="" と owner_name）
 
         - 大会名：いつでも変えられる
         - ブロック分け（席順も）：開始前は自由に。開始後は、まだ1局も記録していないブロックだけ
@@ -635,11 +658,17 @@ class LeagueStore:
             if name is not None:
                 if " ".join(name.split()):
                     t["name"] = self._unique_name(name, exclude=tid)
-            if owner_player is not None:
-                if not owner_player:
-                    raise LeagueError("大会ごとにオーナーを決めます。外すのではなく、別の人を選んでください")
+            if owner_player:
                 self._player(owner_player)
+                if owner_player not in t["players"]:
+                    raise LeagueError("オーナーは参加者から選ぶか、「運営だけ（参加しない）」にしてください")
                 t["owner_player"] = owner_player
+                t["owner_name"] = None
+            elif owner_player == "" or owner_name is not None:
+                if owner_name is None:
+                    raise LeagueError("大会ごとにオーナーを決めます。外すのではなく、別の人を選ぶか「運営だけ」にしてください")
+                t["owner_player"] = None
+                t["owner_name"] = self._staff_name(owner_name)
             if start_points is not None:
                 sp = self._check_start_points(start_points)
                 changed = sp != {str(n): self.tour_start(t, n) for n in (4, 3, 2)}
@@ -675,6 +704,7 @@ class LeagueStore:
                 else:
                     raise LeagueError("決勝が始まったので、ブロック分けは変えられません")
                 t["players"] = [pid for b in t["blocks"] for pid in b]
+                self._sync_owner(t)
             for i, gid in enumerate(t["block_games"]):  # 卓の名前も大会名に合わせる
                 self.data["games"][gid]["title"] = f"{t['name']} {chr(65 + i)}ブロック"
             if t["final_game"]:
@@ -697,6 +727,7 @@ class LeagueStore:
             if blocks not in [f["blocks"] for f in formats(n)]:
                 raise LeagueError(f"{n}人では{blocks}ブロックに分けられません（大会は{MIN_PLAYERS}〜{MAX_PLAYERS}人）")
             t["players"] = list(player_ids)
+            self._sync_owner(t)
             t["blocks"] = self._draw(player_ids, blocks)
             self._save()
             return t

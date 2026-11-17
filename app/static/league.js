@@ -107,12 +107,28 @@ function startInput(id) {
   const v = $(id).value.trim();
   return v === "" ? null : parseInt(v, 10);
 }
-function ownerOptions(select, value) {
-  // 大会ごとにオーナーを必ず決める（未選択は「選んでください」）
-  const ps = ui.data.players.slice().sort((a, b) => a.name.localeCompare(b.name, "ja")).map((p) => [p.id, p.name]);
-  options(select, value && ps.some(([id]) => id === value) ? ps : [["", "（オーナーを選んでください）"], ...ps], false);
-  select.value = value && ps.some(([id]) => id === value) ? value : "";
+const STAFF = "__staff__";  // 参加しない運営だけのオーナー（PC で運営するときなど）
+function ownerOptions(select, value, pids) {
+  // 大会ごとにオーナーを必ず決める：参加者の誰か、または「運営だけ（参加しない）」
+  const ps = ui.data.players.filter((p) => pids.has(p.id)).sort((a, b) => a.name.localeCompare(b.name, "ja")).map((p) => [p.id, `${p.name}（参加者）`]);
+  const all = [[STAFF, "🖥 運営だけ（大会に参加しない）"], ...ps];
+  const ok = value && all.some(([id]) => id === value);
+  options(select, ok ? all : [["", "（オーナーを選んでください）"], ...all], false);
+  select.value = ok ? value : "";
 }
+function ownerBody(owner, ownerName, pids) {
+  if (owner === STAFF) return { owner_player: "", owner_name: (ownerName || "").trim() || "運営" };
+  return owner && pids.has(owner) ? { owner_player: owner } : {};
+}
+// オーナーの表示：参加者なら🇯🇵付きのプレイヤー、運営だけなら名前と「運営」の目印
+function ownerEl(t) {
+  if (t.owner_player) return whoEl(t.owner_player);
+  if (!t.owner_name) return el("span", "lbl", "（未設定）🇯🇵");
+  const w = el("span", "who staff");
+  w.append(el("span", "avatar", "🖥"), el("span", "name", t.owner_name), el("span", "flag", "🇯🇵"), el("span", "staff-tag", "運営・参加しない"));
+  return w;
+}
+function ownerName(t) { return t.owner_player ? player(t.owner_player).name : t.owner_name || ""; }
 function seatName(g, i) {
   const n = g.players.length;
   return SEATS[(i - g.dealer + n) % n];
@@ -205,7 +221,7 @@ function renderTour() {
       head.append(el("span", null, t.name), el("span", "state-tag done", t.ended_early ? "途中で終了" : "終了"));
       const line = el("span", "line");
       line.append(el("span", null, t.king ? `👑 キング：${player(t.king).name}` : "キングなし"));
-      if (t.owner_player) line.append(el("span", null, `オーナー：${player(t.owner_player).name}`));
+      if (ownerName(t)) line.append(el("span", null, `オーナー：${ownerName(t)}${t.owner_player ? "" : "（運営）"}`));
       b.append(head, line);
       b.addEventListener("click", () => { ui.openTour = open && open.id === t.id ? null : t.id; renderTour(); });
       list.append(b);
@@ -216,7 +232,8 @@ function renderTour() {
 }
 
 function renderSetup() {
-  if (!$("tourOwner").matches(":focus")) ownerOptions($("tourOwner"), $("tourOwner").value);
+  if (!$("tourOwner").matches(":focus")) ownerOptions($("tourOwner"), $("tourOwner").value, ui.tourPick);
+  $("tourOwnerNameBox").hidden = $("tourOwner").value !== STAFF;
   // 消えたプレイヤーは外す
   [...ui.tourPick].forEach((pid) => { if (!ui.data.players.some((p) => p.id === pid)) ui.tourPick.delete(pid); });
   pickButtons($("tourPick"), (pid) => ui.tourPick.has(pid), null, (pid) => {
@@ -244,7 +261,7 @@ function renderSetup() {
     l.append(r, el("span", null, f.label));
     box.append(l);
   });
-  $("tourCreate").disabled = !fs.length || !$("tourOwner").value;
+  $("tourCreate").disabled = !fs.length || !$("tourOwner").value || ($("tourOwner").value !== STAFF && !ui.tourPick.has($("tourOwner").value));
   $("tourOwnerNote").hidden = !!$("tourOwner").value;
 }
 $("tourOwner").addEventListener("change", () => renderSetup());
@@ -254,7 +271,9 @@ $("tourCreate").addEventListener("click", async () => {
   try {
     const r = await api("POST", "/api/league/tournaments", {
       name: $("tourName").value, players: [...ui.tourPick], blocks: ui.tourBlocks,
-      owner_player: $("tourOwner").value,
+      ...($("tourOwner").value === STAFF
+        ? { owner_name: $("tourOwnerName").value.trim() || "運営" }
+        : { owner_player: $("tourOwner").value }),
       start_points: { 4: startInput("tourStart4") ?? 25000, 3: startInput("tourStart3") ?? 35000, 2: startInput("tourStart2") ?? 25000 },
     });
     const keys = ownerKeys();
@@ -291,7 +310,7 @@ function tourCard(t) {
   // オーナー（🇯🇵）と編集ボタン
   const ol = el("div", "owner-line");
   ol.append(el("span", "lbl", "オーナー"));
-  if (t.owner_player) ol.append(whoEl(t.owner_player)); else ol.append(el("span", "lbl", "（未設定）🇯🇵"));
+  ol.append(ownerEl(t));
   if (!(ui.edit && ui.edit.tid === t.id)) {
     const eb = btn("編集", () => {
       if (!ownerKey(t.id)) { flash("編集はオーナーの端末でできます。オーナーに「ほかの端末でもオーナー操作」のリンクをもらってください"); return; }
@@ -1137,7 +1156,7 @@ $("regDelete").addEventListener("click", async () => {
 function startEdit(t) {
   ui.edit = {
     tid: t.id, name: t.name, blocks: t.blocks.map((b) => [...b]), sel: null,
-    owner: t.owner_player || "", start: { ...DEFAULT_START, ...(t.start_points || {}) },
+    owner: t.owner_player || (t.owner_name ? STAFF : ""), ownerName: t.owner_name || "運営", start: { ...DEFAULT_START, ...(t.start_points || {}) },
     entries: false, pick: new Set(t.players), nb: t.blocks.length,
   };
   renderTour();
@@ -1162,10 +1181,19 @@ function editView(t) {
 
   const ownerField = el("label", "field", "オーナー（🇯🇵の旗を立てる人）");
   const os = document.createElement("select");
-  ownerOptions(os, e.owner);
-  os.addEventListener("change", () => (e.owner = os.value));
+  ownerOptions(os, e.owner, new Set(t.players));
   ownerField.append(os);
   box.append(ownerField);
+  const staffField = el("label", "field", "運営者の名前（大会には参加しません）");
+  const sn = document.createElement("input");
+  sn.type = "text";
+  sn.maxLength = 16;
+  sn.value = e.ownerName;
+  sn.addEventListener("input", () => (e.ownerName = sn.value));
+  staffField.append(sn);
+  staffField.hidden = e.owner !== STAFF;
+  box.append(staffField);
+  os.addEventListener("change", () => { e.owner = os.value; staffField.hidden = e.owner !== STAFF; });
 
   if (t.status !== "done") {
     box.append(el("h3", "sub", "持ち点"));
@@ -1244,7 +1272,7 @@ function editView(t) {
   const row = el("div", "row");
   row.append(btn("やめる", () => { ui.edit = null; renderTour(); }));
   row.append(btn("保存する", async () => {
-    const body = { name: e.name, owner_player: e.owner || null };
+    const body = { name: e.name, ...ownerBody(e.owner, e.ownerName, new Set(t.players)) };
     if (canBlocks) body.blocks = e.blocks;
     if (t.status !== "done") body.start_points = e.start;
     try {
@@ -1297,7 +1325,7 @@ function entriesView(t) {
     try {
       const H = { "X-Owner-Key": ownerKey(t.id) || "" };
       await api("POST", `/api/league/tournaments/${t.id}/entries`, { players: [...e.pick], blocks: e.nb }, H);
-      await api("PATCH", `/api/league/tournaments/${t.id}`, { name: e.name, owner_player: e.owner || null, start_points: e.start }, H);
+      await api("PATCH", `/api/league/tournaments/${t.id}`, { name: e.name, ...ownerBody(e.owner, e.ownerName, e.pick), start_points: e.start }, H);
       ui.edit = null;
       flash("参加者を変えて抽選し直しました", false);
       await refresh();

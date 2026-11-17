@@ -207,3 +207,7 @@ button:disabled.danger { opacity: .45; }
 .qr-box { display: flex; justify-content: center; padding: 8px; background: #fff; border-radius: 12px; }
 .qr-box img { width: min(240px, 70vw); height: auto; image-rendering: pixelated; }
 @media (prefers-color-scheme: dark) { .me-bar { background: #1d3327; } }
+
+/* 参加しない運営だけのオーナー */
+.who.staff .avatar { display: inline-flex; align-items: center; justify-content: center; }
+.staff-tag { font-size: .68rem; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--muted); color: #fff; margin-left: 4px; white-space: nowrap; }

@@ -547,3 +547,40 @@ def test_device_api_and_qr(tmp_path, monkeypatch):
     assert not client.post(f"/api/league/tournaments/{tid}/whoami", json={"player": ids[1], "device_key": dk}).json()["ok"]
     q = client.get("/api/league/qr", params={"text": "https://example.test/taikai#join=x"})
     assert q.status_code == 200 and q.headers["content-type"].startswith("image/svg") and b"<svg" in q.content
+
+
+def test_staff_owner_not_in_blocks_or_standings(store):
+    ids = _players(store, 4)
+    with pytest.raises(LeagueError):
+        store.add_tournament("PC運営", ids[:3], 1, owner_player=ids[3])  # 参加していない人はオーナーにできない
+    t, key = store.add_tournament("PC運営", ids, 1, owner_name="  はせけん  ")
+    assert t["owner_player"] is None and t["owner_name"] == "はせけん"
+    assert "はせけん" not in [store.data["players"][p]["name"] for b in t["blocks"] for p in b]
+    assert [r["id"] for r in store.tour_standings(t)] and all(r["id"] in ids for r in store.tour_standings(t))
+    store.start_tournament(t["id"], key)  # 運営だけのオーナーも操作できる
+    # 参加者のオーナーへ切り替え・運営へ戻す
+    store.edit_tournament(t["id"], key, owner_player=ids[2])
+    assert t["owner_player"] == ids[2] and t["owner_name"] is None
+    store.edit_tournament(t["id"], key, owner_player="", owner_name="運営さん")
+    assert t["owner_player"] is None and t["owner_name"] == "運営さん"
+    with pytest.raises(LeagueError):
+        store.edit_tournament(t["id"], key, owner_player="")  # 名前なしで外すことはできない
+
+
+def test_owner_leaving_entries_becomes_staff(store):
+    ids = _players(store, 5)
+    t, key = store.add_tournament("入れ替え", ids[:4], 1, owner_player=ids[0])
+    store.change_entries(t["id"], key, ids[1:5], 1)
+    assert t["owner_player"] is None and t["owner_name"] == "P0"
+
+
+def test_api_staff_owner(tmp_path, monkeypatch):
+    import app.league_api as api
+    monkeypatch.setattr(api, "store", LeagueStore(tmp_path))
+    client = TestClient(app)
+    ids = [client.post("/api/league/players", json={"name": f"運営{i}", "emoji": "🐸"}).json()["id"] for i in range(3)]
+    assert client.post("/api/league/tournaments", json={"players": ids, "blocks": 1, "owner_name": " "}).status_code == 422
+    r = client.post("/api/league/tournaments", json={"players": ids, "blocks": 1, "owner_name": "PCの人"})
+    assert r.status_code == 200 and r.json()["tournament"]["owner_name"] == "PCの人"
+    s = client.get("/api/league").json()
+    assert len(s["players"]) == 3  # 運営者はプレイヤーにも成績にも入らない
