@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
   <link rel="stylesheet" href="/static/style.css?v=15">
-  <link rel="stylesheet" href="/static/league.css?v=11">
+  <link rel="stylesheet" href="/static/league.css?v=12">
 </head>
 <body>
   <header class="topbar">
@@ -39,7 +39,10 @@
         <label class="field">オーナー（この大会を仕切る人。名前の横に🇯🇵の旗が付きます）
           <select id="tourOwner"></select>
         </label>
-        <p id="tourOwnerNote" class="tip">大会ごとにオーナーを1人決めてください。大会を作ったこのスマホがオーナー用の端末になります（オーナー本人のスマホへは、あとで「ほかの端末でもオーナー操作」のリンクで渡せます）。</p>
+        <label class="field" id="tourOwnerNameBox" hidden>運営者の名前（大会には参加しません）
+          <input id="tourOwnerName" type="text" maxlength="16" value="運営">
+        </label>
+        <p id="tourOwnerNote" class="tip">大会ごとにオーナーを1人決めてください。参加者がオーナーをするときは、先に下で参加者を選ぶと名前が出ます。ノートPCなどで運営だけして自分は打たないときは「運営だけ（大会に参加しない）」を選びます（組み分けや成績には入りません）。大会を作ったこの端末がオーナー用の端末になります。</p>
         <h3 class="sub">持ち点 <small>大会を始めるまでは自由に変えられます</small></h3>
         <div class="start-points">
           <label class="field">四麻（4人卓） <input id="tourStart4" type="number" min="1000" max="200000" step="1000" value="25000" inputmode="numeric"></label>
@@ -259,6 +262,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=10"></script>
+  <script src="/static/league.js?v=11"></script>
 </body>
 </html>

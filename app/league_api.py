@@ -176,7 +176,9 @@ class TournamentIn(BaseModel):
     players: list[str] = Field(max_length=32)
     blocks: int
     start_points: dict[str, int] | None = None  # {"4": 25000, "3": 35000}
-    owner_player: str = Field(min_length=1, max_length=40)  # 大会ごとに必ずオーナーを決める
+    # 大会ごとに必ずオーナーを決める：参加者から選ぶか、参加しない運営者の名前（PC で運営するときなど）
+    owner_player: str | None = Field(default=None, max_length=40)
+    owner_name: str | None = Field(default=None, max_length=16)
 
 
 def _public(t: dict) -> dict:
@@ -188,8 +190,10 @@ def _public(t: dict) -> dict:
 
 @router.post("/api/league/tournaments")
 async def add_tournament(req: TournamentIn) -> dict:
+    if not req.owner_player and not (req.owner_name or "").strip():
+        raise HTTPException(status_code=422, detail="オーナーを参加者から選ぶか、「運営だけ（参加しない）」にして名前を入れてください")
     t, key = await _run(store.add_tournament, req.name, req.players, req.blocks,
-                        req.start_points, req.owner_player)
+                        req.start_points, req.owner_player, req.owner_name if not req.owner_player else None)
     # 合言葉はこの1回だけ返す。オーナーの端末が保存しておき、以後の操作で X-Owner-Key に付ける
     return {"tournament": _public(t), "owner_key": key}
 
@@ -213,13 +217,14 @@ class TournamentEdit(BaseModel):
     name: str | None = Field(default=None, max_length=60)
     blocks: list[list[str]] | None = Field(default=None, max_length=4)
     start_points: dict[str, int] | None = None
-    owner_player: str | None = None  # オーナーを別の人に変える（外すことはできない）
+    owner_player: str | None = None  # オーナーを別の参加者に変える。"" と owner_name で参加しない運営者に
+    owner_name: str | None = Field(default=None, max_length=16)
 
 
 @router.patch("/api/league/tournaments/{tid}")
 async def edit_tournament(tid: str, req: TournamentEdit, x_owner_key: str | None = Header(default=None)) -> dict:
     return _public(await _run(store.edit_tournament, tid, x_owner_key, req.name, req.blocks,
-                           req.start_points, req.owner_player))
+                           req.start_points, req.owner_player, req.owner_name))
 
 
 class EntriesIn(BaseModel):
