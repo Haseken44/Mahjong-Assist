@@ -271,6 +271,9 @@ function tourCard(t) {
     return card;
   }
 
+  if (t.status === "done" && t.ended_early) {
+    card.append(el("p", "edit-bar", "この大会は途中で終了しました（キングなし）。記録した局の点数は個人成績に残っています。"));
+  }
   if (t.status === "done" && t.king) {
     const k = el("div", "king");
     k.append(el("div", "crown", "👑"), avatarEl(player(t.king), "huge"), el("div", "title", "キング"), el("div", "name", player(t.king).name));
@@ -335,6 +338,12 @@ function tourCard(t) {
     del.className = "small-btn";
     card.append(del);
   }
+  if (owner && (t.status === "blocks" || t.status === "final")) {
+    card.append(btn("大会を終了する", async () => {
+      if (!confirm(`「${t.name}」を終了しますか？\n\n・終わっていない卓は打ち切りになり、キングは決まりません\n・記録した局の点数は個人成績に残ります\n・終了すると元に戻せません`)) return;
+      await ownerAction(t, "/end", "POST", "大会を終了しました。「新しい大会を作る」で最初から始められます");
+    }, "small-btn danger"));
+  }
   if (!owner && t.status === "setup") card.append(el("p", "tip", "オーナーが「大会開始」を押すと、各卓の点数表ができます。"));
   if (!owner && t.status === "blocks") card.append(el("p", "tip", "全ブロックが終わったら、オーナーが決勝を始めます。"));
   return card;
@@ -352,7 +361,7 @@ function gameBlock(g, label, winner) {
   const b = el("div", "block");
   if (!g) return b;
   const h = el("h3", null, label);
-  h.append(el("span", "state-tag " + (g.finished ? "done" : g.hands.length ? "live" : ""), g.finished ? "終了" : g.hands.length ? `対局中・${g.hands.length}局` : "開始前"));
+  h.append(el("span", "state-tag " + (g.finished ? "done" : g.hands.length ? "live" : ""), g.aborted ? "打ち切り" : g.finished ? "終了" : g.hands.length ? `対局中・${g.hands.length}局` : "開始前"));
   b.append(h);
   g.order.forEach((pid, r) => {
     const m = el("div", "member" + (pid === winner ? " win" : (!g.finished && r === 0 && g.hands.length ? " top" : "")));
@@ -399,7 +408,7 @@ function renderGames() {
     b.type = "button";
     const head = el("span", "head");
     head.append(el("span", null, g.title), el("span", "state-tag " + (g.finished ? "done" : g.hands.length ? "live" : ""),
-      g.finished ? "終了" : g.hands.length ? `対局中・${g.hands.length}局` : "開始前"));
+      g.aborted ? "打ち切り" : g.finished ? "終了" : g.hands.length ? `対局中・${g.hands.length}局` : "開始前"));
     const line = el("span", "line");
     g.order.forEach((pid, r) => line.append(el("span", null, `${r + 1}. ${player(pid).name} ${pts(g.points[pid])}`)));
     b.append(head, line);
@@ -745,7 +754,46 @@ function renderPlayers() {
     list.append(b);
   });
   if (!ui.data.players.length) list.append(el("p", "tip", "名前とアバターを登録すると、大会や対局に参加できます。"));
+  const lt = ui.data.latest_tournament;
+  const can = !lt || !!ownerKey(lt);
+  $("resetOpen").disabled = !can;
+  $("resetNote").hidden = can;
+  $("resetNote").textContent = "リセットは、いちばん新しい大会のオーナーの端末でだけできます（オーナーの🇯🇵の人に頼んでください）。";
 }
+
+// ---------- リセット（最初からやり直す） ----------
+$("resetOpen").addEventListener("click", () => {
+  $("resetWord").value = "";
+  $("resetError").hidden = true;
+  $("resetDo").disabled = true;
+  document.querySelector("input[name=resetKind][value=all]").checked = true;
+  $("resetDialog").showModal();
+});
+$("resetWord").addEventListener("input", () => { $("resetDo").disabled = $("resetWord").value.trim() !== "リセット"; });
+$("resetCancel").addEventListener("click", () => $("resetDialog").close());
+$("resetForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const keep = document.querySelector("input[name=resetKind]:checked").value === "keep";
+  const lt = ui.data.latest_tournament;
+  try {
+    await api("POST", "/api/league/reset", { confirm: $("resetWord").value.trim(), keep_players: keep },
+      lt ? { "X-Owner-Key": ownerKey(lt) || "" } : {});
+  } catch (e) {
+    $("resetError").textContent = e.message;
+    $("resetError").hidden = false;
+    return;
+  }
+  $("resetDialog").close();
+  save("mj-owner-keys", {});
+  save("mj-league-game", null);
+  Object.assign(ui, { game: null, edit: null, showSetup: false, editHand: null, newPick: [] });
+  ui.tourPick.clear();
+  ui.tab = keep ? "tour" : "players";
+  save("mj-league-tab", ui.tab);
+  flash(keep ? "リセットしました。プレイヤーはそのままです。「大会」から新しい大会を作れます"
+    : "リセットしました。プレイヤーを登録して、最初から始めてください", false);
+  await refresh();
+});
 
 // ---------- 登録ダイアログ ----------
 let regTarget = null; // 登録後に自動で選ぶ先（"tour" | "new"）
@@ -1075,5 +1123,5 @@ $("yakumanClose").addEventListener("click", () => $("yakumanDialog").close());
 takeOwnerLink();
 refresh();
 // 他の卓の点数も随時反映（画面を見ているときだけ）
-setInterval(() => { if (!document.hidden && !$("regDialog").open && !$("yakumanDialog").open && !ui.edit) refresh(); }, POLL_MS);
+setInterval(() => { if (!document.hidden && !$("regDialog").open && !$("yakumanDialog").open && !$("resetDialog").open && !ui.edit) refresh(); }, POLL_MS);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });

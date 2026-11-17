@@ -507,6 +507,8 @@ class LeagueStore:
             if not g["finished"]:
                 return g
             t = self.data["tournaments"].get(g["tournament"]) if g["tournament"] else None
+            if t and t.get("ended_early"):
+                raise LeagueError("終了した大会の卓は再開できません")
             if t and g["stage"] == "block" and t["status"] != "blocks":
                 raise LeagueError("決勝が始まったので、ブロックの対局は再開できません")
             g["finished"] = False
@@ -713,7 +715,7 @@ class LeagueStore:
         out = []
         for gid in t["block_games"]:
             g = self.data["games"][gid]
-            out.append(g["ranks"][0] if g["finished"] else None)
+            out.append(g["ranks"][0] if g["finished"] and g["ranks"] else None)
         return out
 
     def start_final(self, tid: str, key: str | None) -> dict:
@@ -743,6 +745,57 @@ class LeagueStore:
                 raise LeagueError("始まった大会は削除できません")
             del self.data["tournaments"][tid]
             self._save()
+
+    def end_tournament(self, tid: str, key: str | None) -> dict:
+        """始まった大会を途中で終わらせる（オーナーのみ）。
+
+        記録した局の点数（個人成績）はそのまま残す。終わっていない卓は「打ち切り」にして順位は付けない。
+        決勝が終わる前なのでキングはなし。
+        """
+        with self.lock:
+            t = self._tour(tid)
+            self._owner(t, key)
+            if t["status"] == "setup":
+                raise LeagueError("まだ始まっていない大会は「この大会をやめる」で削除できます")
+            if t["status"] == "done":
+                return t
+            for gid in [*t["block_games"], t["final_game"]]:
+                g = self.data["games"].get(gid) if gid else None
+                if g and not g["finished"]:
+                    g["finished"] = True
+                    g["ranks"] = None
+                    g["aborted"] = True
+            t["status"] = "done"
+            t["ended_early"] = True
+            t["ended"] = int(time.time())
+            self._save()
+            return t
+
+    def latest_tournament(self) -> dict | None:
+        ts = list(self.data["tournaments"].values())
+        # 同じ秒に作られたときは後から作った方
+        return max(enumerate(ts), key=lambda it: (it[1].get("created", 0), it[0]))[1] if ts else None
+
+    def reset(self, key: str | None, keep_players: bool = False) -> dict:
+        """大会・対局・成績（と、keep_players でなければプレイヤー登録）を消して最初に戻す。
+
+        大会があるときは、いちばん新しい大会のオーナーだけができる。
+        消す前の中身は league.backup-<時刻>.json（写真は avatars.backup-<時刻>/）に退避するので、サーバーで戻せる。
+        """
+        with self.lock:
+            t = self.latest_tournament()
+            if t:
+                self._owner(t, key)
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            self.root.mkdir(parents=True, exist_ok=True)
+            backup = self.root / f"league.backup-{stamp}.json"
+            backup.write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding="utf-8")
+            players = self.data["players"] if keep_players else {}
+            if not keep_players and self.avatar_dir.exists() and any(self.avatar_dir.iterdir()):
+                os.replace(self.avatar_dir, self.root / f"avatars.backup-{stamp}")
+            self.data = {"players": players, "games": {}, "tournaments": {}}
+            self._save()
+            return {"backup": backup.name, "players": len(players)}
 
     # ---------- 集計 ----------
     def stats(self) -> dict[str, dict]:
@@ -808,4 +861,6 @@ class LeagueStore:
             tours.sort(key=lambda t: -t["created"])
             return {"players": players, "games": games, "tournaments": tours, "start_points": START_POINTS,
                     "formats": {n: formats(n) for n in range(MIN_PLAYERS, MAX_PLAYERS + 1)},
-                    "nima_yakuman": NIMA_YAKUMAN}
+                    "nima_yakuman": NIMA_YAKUMAN,
+                    # リセットできるのはこの大会のオーナー（大会がなければ誰でも）
+                    "latest_tournament": (self.latest_tournament() or {}).get("id")}
