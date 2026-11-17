@@ -22,7 +22,11 @@ import time
 from pathlib import Path
 
 SEATS = ["東", "南", "西", "北"]
-START_POINTS = {4: 25000, 3: 35000}  # 配給原点（雀魂と同じ）
+START_POINTS = {4: 25000, 3: 35000, 2: 25000}  # 配給原点（雀魂と同じ。二麻は四麻と同じ）
+KIND = {4: "四麻", 3: "三麻", 2: "二麻"}
+# 二麻（2人麻雀）は四麻と同じルールで、アガリは役満だけ（子 32,000点・親 48,000点以上）
+NIMA_YAKUMAN = {"child": 32000, "dealer": 48000}
+MIN_PLAYERS, MAX_PLAYERS = 2, 16
 MAX_NAME = 16
 MAX_POINTS = 1_000_000
 MIN_START, MAX_START = 1000, 200_000  # 持ち点として選べる範囲（100点単位）
@@ -67,19 +71,31 @@ def block_sizes(n: int, blocks: int) -> list[int]:
 
 
 def formats(n: int) -> list[dict]:
-    """n 人で組める大会形式。ブロック数＝決勝の人数なので 3 か 4。各ブロックは 3 人か 4 人。"""
+    """n 人（2〜16人）で組める大会形式。
+
+    - 2〜4人：ブロック分けなし。1卓（二麻・三麻・四麻）のトップがそのままキング
+    - 5〜16人：2〜4ブロック（各2〜4人）に分け、各ブロックのトップ（＝ブロック数の人数）で決勝
+      ブロック数が決勝の人数になる（2ブロック→二麻、3→三麻、4→四麻）
+    おすすめ順：二麻の卓が少ない → ブロックが多い（決勝がにぎやか）の順。
+    """
+    if not MIN_PLAYERS <= n <= MAX_PLAYERS:
+        return []
+    if n <= 4:
+        return [{"blocks": 1, "sizes": [n], "final_players": n,
+                 "label": f"{KIND[n]}1卓で、そのままキングを決める（ブロック分けなし）"}]
     out = []
-    for b in (4, 3):
-        if 3 * b <= n <= 4 * b:
+    for b in (4, 3, 2):
+        if 2 * b <= n <= 4 * b:
             sizes = block_sizes(n, b)
             kinds = sorted(set(sizes), reverse=True)
-            table = "・".join(f"{'四麻' if s == 4 else '三麻'}{sizes.count(s)}卓" for s in kinds)
+            table = "・".join(f"{KIND[s]}{sizes.count(s)}卓" for s in kinds)
             out.append({
                 "blocks": b,
                 "sizes": sizes,
                 "final_players": b,
-                "label": f"{table} → 決勝は{'四麻' if b == 4 else '三麻'}（各ブロックのトップ{b}人）",
+                "label": f"{table} → 決勝は{KIND[b]}（各ブロックのトップ{b}人）",
             })
+    out.sort(key=lambda f: (f["sizes"].count(2), -f["blocks"]))
     return out
 
 
@@ -214,8 +230,8 @@ class LeagueStore:
 
     def _make_game(self, player_ids: list[str], title: str, tournament: str | None = None,
                    stage: str | None = None, block: int | None = None, start: int | None = None) -> dict:
-        if len(player_ids) not in (3, 4):
-            raise LeagueError("対局は3人（三麻）か4人（四麻）です")
+        if len(player_ids) not in (2, 3, 4):
+            raise LeagueError("対局は2人（二麻）・3人（三麻）・4人（四麻）のどれかです")
         if len(set(player_ids)) != len(player_ids):
             raise LeagueError("同じプレイヤーが2回選ばれています")
         for pid in player_ids:
@@ -311,8 +327,18 @@ class LeagueStore:
                 pts = self._amount(hand.get("points"), "点数")
                 if pts == 0:
                     raise LeagueError("点数を入力してください")
+                self._check_nima(pl, winner, dealer, pts)
                 deltas[winner] += pts
                 deltas[loser] -= pts
+            elif len(pl) == 2:
+                # 二麻のツモ：相手が役満の点数を全部払う（pay_child に入れる）
+                child = self._amount(hand.get("pay_child"), "相手の支払い")
+                if child == 0:
+                    raise LeagueError("ツモの支払い点数を入力してください")
+                self._check_nima(pl, winner, dealer, child)
+                other = pl[1] if pl[0] == winner else pl[0]
+                deltas[other] -= child
+                deltas[winner] += child
             else:
                 dealer_id = pl[dealer]
                 child = self._amount(hand.get("pay_child"), "子の支払い")
@@ -356,6 +382,15 @@ class LeagueStore:
             "note": (hand.get("note") or "").strip()[:40],
             "at": int(time.time()),
         }
+
+    @staticmethod
+    def _check_nima(pl: list[str], winner: str, dealer: int, total: int) -> None:
+        """二麻のアガリは役満だけ（子 32,000点・親 48,000点以上）。"""
+        if len(pl) != 2:
+            return
+        need = NIMA_YAKUMAN["dealer"] if pl.index(winner) == dealer else NIMA_YAKUMAN["child"]
+        if total < need:
+            raise LeagueError(f"二麻のアガリは役満だけです（{'親' if need == 48000 else '子'}は{need:,}点以上）")
 
     @staticmethod
     def _next_dealer(g: dict, rec: dict) -> int:
@@ -509,7 +544,7 @@ class LeagueStore:
 
     def _check_start_points(self, sp: dict | None) -> dict:
         sp = sp or {}
-        return {str(n): check_start(sp.get(str(n), sp.get(n, START_POINTS[n]))) for n in (4, 3)}
+        return {str(n): check_start(sp.get(str(n), sp.get(n, START_POINTS[n]))) for n in (4, 3, 2)}
 
     def add_tournament(self, name: str, player_ids: list[str], blocks: int,
                        start_points: dict | None = None, owner_player: str | None = None) -> tuple[dict, str]:
@@ -524,7 +559,7 @@ class LeagueStore:
             n = len(player_ids)
             ok = [f["blocks"] for f in formats(n)]
             if not ok:
-                raise LeagueError(f"{n}人では大会を組めません。9〜16人で、3〜4ブロックに分けられる人数にしてください")
+                raise LeagueError(f"{n}人では大会を組めません。大会は{MIN_PLAYERS}〜{MAX_PLAYERS}人です")
             if blocks not in ok:
                 raise LeagueError(f"{n}人では{blocks}ブロックに分けられません")
             key = secrets.token_urlsafe(18)
@@ -558,14 +593,16 @@ class LeagueStore:
             return t
 
     def _check_blocks(self, blocks: list[list[str]]) -> list[list[str]]:
-        if not isinstance(blocks, list) or len(blocks) not in (3, 4):
-            raise LeagueError("ブロックは3つか4つです")
+        if not isinstance(blocks, list) or not 1 <= len(blocks) <= 4:
+            raise LeagueError("ブロックは1〜4つです")
         flat = [pid for b in blocks for pid in b]
         if len(set(flat)) != len(flat):
             raise LeagueError("同じプレイヤーが2つの席に入っています")
         for b in blocks:
-            if len(b) not in (3, 4):
-                raise LeagueError("1ブロックは3人（三麻）か4人（四麻）です")
+            if len(b) not in (2, 3, 4):
+                raise LeagueError("1ブロックは2人（二麻）・3人（三麻）・4人（四麻）のどれかです")
+        if len(blocks) == 1 and len(flat) > 4:
+            raise LeagueError("ブロック分けなしの大会は4人までです")
         for pid in flat:
             self._player(pid)
         return [list(b) for b in blocks]
@@ -590,7 +627,7 @@ class LeagueStore:
                 t["owner_player"] = owner_player or None
             if start_points is not None:
                 sp = self._check_start_points(start_points)
-                changed = sp != {str(n): self.tour_start(t, n) for n in (4, 3)}
+                changed = sp != {str(n): self.tour_start(t, n) for n in (4, 3, 2)}
                 if changed and t["status"] == "done":
                     raise LeagueError("終わった大会の持ち点は変えられません")
                 t["start_points"] = sp
@@ -643,7 +680,7 @@ class LeagueStore:
                 self._player(pid)
             n = len(player_ids)
             if blocks not in [f["blocks"] for f in formats(n)]:
-                raise LeagueError(f"{n}人では{blocks}ブロックに分けられません（9〜16人）")
+                raise LeagueError(f"{n}人では{blocks}ブロックに分けられません（大会は{MIN_PLAYERS}〜{MAX_PLAYERS}人）")
             t["players"] = list(player_ids)
             t["blocks"] = self._draw(player_ids, blocks)
             self._save()
@@ -655,6 +692,15 @@ class LeagueStore:
             self._owner(t, key)
             if t["status"] != "setup":
                 raise LeagueError("この大会はもう始まっています")
+            if len(t["blocks"]) == 1:
+                # 2〜4人の大会：ブロック分けなしで、いきなり決勝（キングを決める1卓）
+                members = t["blocks"][0]
+                g = self._make_game(members, f"{t['name']} 決勝", tournament=tid, stage="final",
+                                    start=self.tour_start(t, len(members)))
+                t["final_game"] = g["id"]
+                t["status"] = "final"
+                self._save()
+                return t
             for i, members in enumerate(t["blocks"]):
                 g = self._make_game(members, f"{t['name']} {chr(65 + i)}ブロック", tournament=tid, stage="block", block=i,
                                     start=self.tour_start(t, len(members)))
@@ -760,4 +806,6 @@ class LeagueStore:
                 d["formats"] = formats(len(t["players"]))
                 tours.append(d)
             tours.sort(key=lambda t: -t["created"])
-            return {"players": players, "games": games, "tournaments": tours, "start_points": START_POINTS}
+            return {"players": players, "games": games, "tournaments": tours, "start_points": START_POINTS,
+                    "formats": {n: formats(n) for n in range(MIN_PLAYERS, MAX_PLAYERS + 1)},
+                    "nima_yakuman": NIMA_YAKUMAN}

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
   <link rel="stylesheet" href="/static/style.css?v=13">
-  <link rel="stylesheet" href="/static/league.css?v=5">
+  <link rel="stylesheet" href="/static/league.css?v=6">
 </head>
 <body>
   <header class="topbar">
@@ -38,6 +38,7 @@
         <div class="start-points">
           <label class="field">四麻（4人卓） <input id="tourStart4" type="number" min="1000" max="200000" step="1000" value="25000" inputmode="numeric"></label>
           <label class="field">三麻（3人卓） <input id="tourStart3" type="number" min="1000" max="200000" step="1000" value="35000" inputmode="numeric"></label>
+          <label class="field">二麻（2人卓） <input id="tourStart2" type="number" min="1000" max="200000" step="1000" value="25000" inputmode="numeric"></label>
         </div>
         <h3 class="sub">参加者を選ぶ <small id="tourCount">0人</small></h3>
         <p class="tip">名前とアバターを登録した人だけが選べます。まだの人は下の「＋プレイヤー登録」から。</p>
@@ -45,7 +46,7 @@
         <button class="add-player-btn" data-open-register>＋プレイヤー登録</button>
         <h3 class="sub">ブロック分け</h3>
         <div id="tourFormats" class="formats"></div>
-        <p class="tip">各ブロック（卓）で1半荘（はんちゃん＝東場と南場）を打ち、トップの人が決勝へ進みます。決勝のトップが「キング」です。</p>
+        <p class="tip">2〜16人で開けます。2〜4人は1卓でそのままキングを決めます。5人以上はブロック（卓）に分けて1半荘（はんちゃん＝東場と南場）ずつ打ち、各ブロックのトップが決勝へ進みます。決勝のトップが「キング」です。二麻（2人麻雀）は四麻と同じルールで、アガリは役満だけです。</p>
         <div class="row"><button id="tourCreate" class="primary" disabled>抽選してブロックを決める</button></div>
       </div>
     </section>
@@ -73,6 +74,7 @@
 
         <div class="card" id="gEntry">
           <h2 id="hTitle">この局の結果を記録</h2>
+          <p id="hNima" class="edit-bar nima" hidden>二麻（2人麻雀）のアガリは役満だけです。子は32,000点、親は48,000点（本場を足した点数）を入れます。ツモは相手が全部払います。</p>
           <p id="hEditBar" class="edit-bar" hidden></p>
           <div class="seg" role="radiogroup">
             <label><input type="radio" name="hkind" value="ron" checked> ロン</label>
@@ -87,6 +89,7 @@
             <h3 class="sub">振り込んだ人（放銃者＝ほうじゅうしゃ） <small>必ず選んでください</small></h3>
             <div id="hLoser" class="who-pick"></div>
             <label class="field">点数（本場込み） <input id="hPoints" type="number" min="0" step="100" inputmode="numeric" placeholder="例: 7700"></label>
+            <div id="hYakuman" class="quick" hidden></div>
           </div>
           <div class="kind-tsumo" hidden>
             <label class="field" id="hChildBox">子の支払い（1人あたり） <input id="hChild" type="number" min="0" step="100" inputmode="numeric" placeholder="例: 1000"></label>
@@ -123,10 +126,10 @@
       <div id="gameList">
         <div class="card">
           <h2>新しい対局 <small>大会以外でも成績を集計できます</small></h2>
-          <p class="tip">卓を囲む3人か4人をタップします。席順（東・南・西・北）は「対局を始める」で自動の抽選になります。</p>
+          <p class="tip">卓を囲む2〜4人をタップします（2人なら二麻：四麻と同じルールで、アガリは役満だけ）。席順（東・南・西・北）は「対局を始める」で自動の抽選になります。</p>
           <div id="newPick" class="pick-list"></div>
           <button class="add-player-btn" data-open-register>＋プレイヤー登録</button>
-          <label class="field">持ち点（空欄なら四麻25,000点・三麻35,000点）
+          <label class="field">持ち点（空欄なら四麻・二麻25,000点、三麻35,000点）
             <input id="newStart" type="number" min="1000" max="200000" step="1000" inputmode="numeric" placeholder="例: 30000">
           </label>
           <div class="row"><button id="newGame" class="primary" disabled>対局を始める</button></div>
@@ -191,6 +194,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=4"></script>
+  <script src="/static/league.js?v=5"></script>
 </body>
 </html>
