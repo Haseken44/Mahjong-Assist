@@ -26,10 +26,16 @@ def test_formats_12_players_has_both():
 
 
 def test_formats_other_counts():
-    assert [x["blocks"] for x in formats(9)] == [3]
+    assert [x["blocks"] for x in formats(9)] == [3, 4]  # 二麻の卓が少ない方がおすすめ
     assert [x["blocks"] for x in formats(16)] == [4]
     assert block_sizes(13, 4) == [4, 3, 3, 3]
-    assert formats(8) == [] and formats(17) == []
+    assert formats(1) == [] and formats(17) == []
+    for n in (2, 3, 4):
+        assert formats(n) == [{"blocks": 1, "sizes": [n], "final_players": n, "label": formats(n)[0]["label"]}]
+    f5 = formats(5)
+    assert [x["blocks"] for x in f5] == [2] and f5[0]["sizes"] == [3, 2] and "決勝は二麻" in f5[0]["label"]
+    assert [x["blocks"] for x in formats(8)] == [2, 3, 4]  # 四麻2卓 → 三麻2卓＋二麻1卓 → 二麻4卓
+    assert all(formats(n) for n in range(2, 17))
 
 
 def test_player_requires_name_and_avatar(store):
@@ -144,7 +150,9 @@ def test_tournament_yonma_blocks_to_sanma_final(store):
 
 def test_tournament_bad_headcount(store):
     with pytest.raises(LeagueError):
-        store.add_tournament("x", _players(store, 8), 3)
+        store.add_tournament("x", _players(store, 1), 1)
+    with pytest.raises(LeagueError):
+        store.add_tournament("x", _players(store, 6), 4)  # 6人を4ブロックには分けられない
 
 
 def test_store_persists(tmp_path):
@@ -231,7 +239,7 @@ def test_start_points_and_owner_flag(store):
     with pytest.raises(LeagueError):
         store.add_tournament("x", ids, 4, start_points={"4": 25050})
     t, key = store.add_tournament("x", ids, 4, start_points={"4": 30000, "3": 40000}, owner_player=ids[0])
-    assert t["owner_player"] == ids[0] and t["start_points"] == {"4": 30000, "3": 40000}
+    assert t["owner_player"] == ids[0] and t["start_points"] == {"4": 30000, "3": 40000, "2": 25000}
     store.edit_tournament(t["id"], key, start_points={"4": 30000, "3": 50000}, owner_player=ids[1])
     assert t["owner_player"] == ids[1]
     store.start_tournament(t["id"], key)
@@ -291,3 +299,37 @@ def test_league_api_edit_hand():
     assert r.status_code == 200 and r.json()["points"][b] == 35000 and r.json()["points"][c] == 27000
     assert client.delete(f"/api/league/games/{g['id']}/hands/last").status_code == 200
     assert client.delete(f"/api/league/games/{g['id']}/hands/0").status_code == 400
+
+
+def test_two_player_tournament_goes_straight_to_final(store):
+    a, b = _players(store, 2)
+    t, key = store.add_tournament("二人大会", [a, b], 1)
+    store.start_tournament(t["id"], key)
+    assert t["status"] == "final" and not t["block_games"]
+    g = store.data["games"][t["final_game"]]
+    assert g["start"] == 25000 and len(g["players"]) == 2
+    p0, p1 = g["players"]
+    # 二麻は役満のみ：子の 8,000 点ロンはアガれない
+    with pytest.raises(LeagueError, match="役満"):
+        store.add_hand(g["id"], {"kind": "ron", "winner": p1, "loser": p0, "points": 8000})
+    with pytest.raises(LeagueError, match="48,000"):
+        store.add_hand(g["id"], {"kind": "ron", "winner": p0, "loser": p1, "points": 32000})  # 親は 48,000
+    store.add_hand(g["id"], {"kind": "tsumo", "winner": p1, "pay_child": 32000})  # 二麻のツモは相手が全部払う
+    assert g["points"] == {p0: -7000, p1: 57000}
+    store.finish_game(g["id"])
+    assert t["king"] == p1 and t["status"] == "done"
+
+
+def test_five_players_two_blocks_nima_final(store):
+    ids = _players(store, 5)
+    t, key = store.add_tournament("五人", ids, 2)
+    assert sorted(len(x) for x in t["blocks"]) == [2, 3]
+    store.start_tournament(t["id"], key)
+    for gid in t["block_games"]:
+        g = store.data["games"][gid]
+        w, l = g["players"][1], g["players"][0]  # 子が親からロン
+        store.add_hand(gid, {"kind": "ron", "winner": w, "loser": l, "points": 32000})
+        store.finish_game(gid)
+    store.start_final(t["id"], key)
+    final = store.data["games"][t["final_game"]]
+    assert len(final["players"]) == 2 and final["start"] == 25000

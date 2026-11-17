@@ -4,6 +4,9 @@
 
 const $ = (id) => document.getElementById(id);
 const SEATS = ["東", "南", "西", "北"];
+const KIND = { 4: "四麻", 3: "三麻", 2: "二麻" };
+const KIND_LONG = { 4: "四麻（4人卓）", 3: "三麻（3人卓）", 2: "二麻（2人卓・役満のみ）" };
+const DEFAULT_START = { 4: 25000, 3: 35000, 2: 25000 };
 const EMOJIS = ["🀄", "🐉", "🐯", "🐼", "🦊", "🐸", "🐙", "🦁", "🐧", "🐱", "🐶", "🦉", "🐻", "🐰", "🐵", "🐨",
   "🌸", "⭐", "🔥", "⚡", "🍀", "🍣", "🍺", "🎯"];
 const POLL_MS = 4000;
@@ -159,18 +162,8 @@ function pickButtons(container, isOn, orderOf, onToggle) {
 
 // ---------- 大会 ----------
 function formats(n) {
-  // サーバーの app/logic/league.py formats() と同じ考え方：ブロック数＝決勝の人数（3か4）、各ブロック3〜4人
-  const out = [];
-  [4, 3].forEach((b) => {
-    if (3 * b <= n && n <= 4 * b) {
-      const base = Math.floor(n / b), extra = n % b;
-      const sizes = [...Array(extra).fill(base + 1), ...Array(b - extra).fill(base)];
-      const kinds = [...new Set(sizes)].sort((x, y) => y - x);
-      const table = kinds.map((s) => `${s === 4 ? "四麻" : "三麻"}${sizes.filter((x) => x === s).length}卓`).join("・");
-      out.push({ blocks: b, label: `${table} → 決勝は${b === 4 ? "四麻" : "三麻"}（各ブロックのトップ${b}人）` });
-    }
-  });
-  return out;
+  // 組み方はサーバー（app/logic/league.py の formats）が決める。おすすめ順に並んでいる
+  return (ui.data.formats && ui.data.formats[n]) || [];
 }
 
 function renderTour() {
@@ -203,7 +196,7 @@ function renderSetup() {
   box.replaceChildren();
   if (!fs.length) {
     box.append(el("p", "none", n < 9
-      ? `大会は9〜16人で組めます（いま${n}人）。3〜4ブロックに分け、各ブロックのトップ3〜4人で決勝をします。`
+      ? `大会は2〜16人で組めます（いま${n}人）。2〜4人なら1卓でそのままキングを決め、5人以上はブロックに分けて各ブロックのトップで決勝をします。`
       : `${n}人だと3〜4ブロックに分けられません（16人まで）。`));
   }
   fs.forEach((f) => {
@@ -224,7 +217,7 @@ $("tourCreate").addEventListener("click", async () => {
     const r = await api("POST", "/api/league/tournaments", {
       name: $("tourName").value, players: [...ui.tourPick], blocks: ui.tourBlocks,
       owner_player: $("tourOwner").value || null,
-      start_points: { 4: startInput("tourStart4") ?? 25000, 3: startInput("tourStart3") ?? 35000 },
+      start_points: { 4: startInput("tourStart4") ?? 25000, 3: startInput("tourStart3") ?? 35000, 2: startInput("tourStart2") ?? 25000 },
     });
     save("mj-owner-player", $("tourOwner").value);
     const keys = ownerKeys();
@@ -269,7 +262,9 @@ function tourCard(t) {
   }
   card.append(ol);
   const sp = t.start_points || { 4: 25000, 3: 35000 };
-  card.append(el("p", "tip", `持ち点：四麻 ${pts(+sp[4])}点・三麻 ${pts(+sp[3])}点`));
+  const sizes = new Set([...t.blocks.map((b) => b.length), t.blocks.length > 1 ? t.blocks.length : 0]);
+  card.append(el("p", "tip", "持ち点：" + [4, 3, 2].filter((k) => sizes.has(k)).map((k) => `${KIND[k]} ${pts(+(sp[k] ?? DEFAULT_START[k]))}点`).join("・")
+    + (sizes.has(2) ? "（二麻のアガリは役満だけ）" : "")));
 
   if (owner && ui.edit && ui.edit.tid === t.id) {
     card.append(editView(t));
@@ -283,7 +278,9 @@ function tourCard(t) {
   }
 
   const n = t.blocks.length;
-  const info = el("p", "tip", `${t.players.length}人・${n}ブロック。各ブロックのトップ${n}人が${n === 4 ? "四麻" : "三麻"}で決勝を打ち、トップが「キング」です。`);
+  const info = el("p", "tip", n === 1
+    ? `${t.players.length}人・ブロック分けなし。${KIND[t.players.length]}1卓のトップが「キング」です。`
+    : `${t.players.length}人・${n}ブロック。各ブロックのトップ${n}人が${KIND[n]}で決勝を打ち、トップが「キング」です。`);
   card.append(info);
 
   if (t.final_game) {
@@ -291,10 +288,12 @@ function tourCard(t) {
     card.append(gameBlock(game(t.final_game), "決勝", null));
   }
 
-  card.append(el("h3", "sub", t.status === "setup" ? "ブロック分け（抽選結果）" : "ブロック"));
+  const single = t.blocks.length === 1;
   const blocks = el("div", "blocks");
+  if (!single || t.status === "setup") card.append(el("h3", "sub", t.status !== "setup" ? "ブロック" : single ? "席順（抽選結果）" : "ブロック分け（抽選結果）"));
   t.blocks.forEach((members, i) => {
-    const label = `${String.fromCharCode(65 + i)}ブロック（${members.length === 4 ? "四麻" : "三麻"}）`;
+    if (single && t.status !== "setup") return;  // ブロックなしの大会は決勝の卓だけ
+    const label = single ? `決勝（${KIND[members.length]}）` : `${String.fromCharCode(65 + i)}ブロック（${KIND[members.length]}）`;
     if (t.status === "setup") {
       const b = el("div", "block");
       b.append(el("h3", null, label));
@@ -389,8 +388,8 @@ function renderGames() {
     renderGames();
   });
   const n = ui.newPick.length;
-  $("newGame").disabled = n < 3;
-  $("newGame").textContent = n < 3 ? `対局を始める（あと${3 - n}人以上）` : `${n === 4 ? "四麻" : "三麻"}で対局を始める（席は抽選）`;
+  $("newGame").disabled = n < 2;
+  $("newGame").textContent = n < 2 ? `対局を始める（あと${2 - n}人以上）` : `${KIND[n]}で対局を始める（席は抽選）`;
 
   const list = $("games");
   list.replaceChildren();
@@ -618,8 +617,30 @@ function updateKind() {
   const g = ui.game && game(ui.game);
   if (!g) return;
   const winnerIsDealer = ui.winner === g.players[dealerSeat(g)];
-  $("hDealerBox").hidden = winnerIsDealer || k !== "tsumo";
-  $("hChildBox").firstChild.textContent = winnerIsDealer ? "全員の支払い（〇〇点オール） " : "子の支払い（1人あたり） ";
+  const nima = g.players.length === 2;
+  $("hNima").hidden = !nima || k === "other";
+  $("hDealerBox").hidden = nima || winnerIsDealer || k !== "tsumo";
+  $("hChildBox").firstChild.textContent = nima ? "相手の支払い（役満の点数・本場込み） "
+    : winnerIsDealer ? "全員の支払い（〇〇点オール） " : "子の支払い（1人あたり） ";
+  // 二麻は役満だけなので、役満の点数をボタンで入れられるようにする
+  const quick = $("hYakuman");
+  quick.hidden = !nima || k !== "ron";
+  const tq = $("hYakumanT") || (() => {
+    const d = el("div", "quick");
+    d.id = "hYakumanT";
+    $("hChildBox").after(d);
+    return d;
+  })();
+  tq.hidden = !nima || k !== "tsumo";
+  if (nima) {
+    const base = winnerIsDealer ? 48000 : 32000;
+    [[quick, "hPoints"], [tq, "hChild"]].forEach(([box, id]) => {
+      box.replaceChildren();
+      [[1, "役満"], [2, "ダブル役満"], [3, "トリプル役満"]].forEach(([m, name]) => {
+        box.append(btn(`${name} ${pts(base * m)}`, () => { $(id).value = base * m; }));
+      });
+    });
+  }
 }
 document.querySelectorAll("input[name=hkind]").forEach((r) => r.addEventListener("change", updateKind));
 
@@ -824,7 +845,7 @@ $("regDelete").addEventListener("click", async () => {
 function startEdit(t) {
   ui.edit = {
     tid: t.id, name: t.name, blocks: t.blocks.map((b) => [...b]), sel: null,
-    owner: t.owner_player || "", start: { ...(t.start_points || { 4: 25000, 3: 35000 }) },
+    owner: t.owner_player || "", start: { ...DEFAULT_START, ...(t.start_points || {}) },
     entries: false, pick: new Set(t.players), nb: t.blocks.length,
   };
   renderTour();
@@ -858,15 +879,15 @@ function editView(t) {
     box.append(el("h3", "sub", "持ち点"));
     if (t.status !== "setup") box.append(el("p", "tip", "開始後は、まだ点数を記録していない卓にだけ反映されます。"));
     const spBox = el("div", "start-points");
-    [4, 3].forEach((n) => {
-      const f = el("label", "field", n === 4 ? "四麻（4人卓）" : "三麻（3人卓）");
+    [4, 3, 2].forEach((n) => {
+      const f = el("label", "field", KIND_LONG[n]);
       const inp = document.createElement("input");
       inp.type = "number";
       inp.step = "1000";
       inp.min = "1000";
       inp.max = "200000";
       inp.inputMode = "numeric";
-      inp.value = e.start[n];
+      inp.value = e.start[n] ?? DEFAULT_START[n];
       inp.addEventListener("input", () => (e.start[n] = parseInt(inp.value, 10) || 0));
       f.append(inp);
       spBox.append(f);
@@ -883,7 +904,7 @@ function editView(t) {
     e.blocks.forEach((members, i) => {
       const locked = blockLocked(t, i);
       const b = el("div", "block" + (locked ? " locked" : ""));
-      const h = el("h3", null, `${String.fromCharCode(65 + i)}ブロック（${members.length === 4 ? "四麻" : "三麻"}）`);
+      const h = el("h3", null, e.blocks.length === 1 ? `決勝（${KIND[members.length]}）` : `${String.fromCharCode(65 + i)}ブロック（${KIND[members.length]}）`);
       if (locked) h.append(el("span", "state-tag", "記録あり・変更不可"));
       b.append(h);
       members.forEach((pid, si) => {
@@ -968,7 +989,7 @@ function entriesView(t) {
   const fs = formats(e.pick.size);
   if (!fs.some((f) => f.blocks === e.nb)) e.nb = fs.length ? fs[0].blocks : null;
   const fbox = el("div", "formats");
-  if (!fs.length) fbox.append(el("p", "none", "大会は9〜16人で、3〜4ブロックに分けられる人数にしてください。"));
+  if (!fs.length) fbox.append(el("p", "none", "大会は2〜16人です。"));
   fs.forEach((f) => {
     const l = el("label");
     const r = document.createElement("input");

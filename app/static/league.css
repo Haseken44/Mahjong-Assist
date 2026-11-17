@@ -121,7 +121,7 @@ dialog.sheet h2 { margin-top: 0; }
 .entries { display: grid; gap: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: 10px; }
 
 /* 持ち点・オーナーの旗 */
-.start-points { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.start-points { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; }
 .start-edit { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-top: 8px; }
 .flag { margin-left: 4px; font-size: 1rem; line-height: 1; }
 .owner-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px; border-radius: 10px; background: var(--bg); margin-bottom: 6px; }
@@ -140,3 +140,9 @@ button.danger { color: var(--accent); border-color: var(--accent); }
 .hands .edited { font-size: .72rem; color: var(--muted); }
 .hands li span + span { margin-left: 0; }
 #gEntry .row #hSave { flex: 2; }
+
+/* 二麻（役満のみ） */
+.edit-bar.nima { background: #e7f1ff; color: #1f4fa8; }
+@media (prefers-color-scheme: dark) { .edit-bar.nima { background: #15233a; color: #9cc0ff; } }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.quick button { min-height: 36px; padding: 4px 10px; font-size: .85rem; }
