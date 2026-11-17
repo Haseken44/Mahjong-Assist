@@ -4,3 +4,4 @@ uvicorn[standard]==0.34.0
 mahjong==1.4.0
 opencv-python-headless==4.10.0.84
 numpy>=1.26,<3
+segno==1.6.6

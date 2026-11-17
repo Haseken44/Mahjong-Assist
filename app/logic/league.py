@@ -498,6 +498,7 @@ class LeagueStore:
                 t = self.data["tournaments"][g["tournament"]]
                 t["king"] = g["ranks"][0]
                 t["status"] = "done"
+                self._close_devices(t)  # 大会が終わったらスマホの紐づけも終わり
             self._save()
             return g
 
@@ -778,8 +779,71 @@ class LeagueStore:
                     g["ranks"] = None
                     g["aborted"] = True
             t["status"] = "done"
+            self._close_devices(t)
             t["ended_early"] = True
             t["ended"] = int(time.time())
+            self._save()
+            return t
+
+    # ---------- プレイヤーとスマホの紐づけ ----------
+    # オーナーがプレイヤーごとに招待（リンク・QR）を作り、本人のスマホで開くと紐づく。
+    # 1人につきスマホ1台。大会が終わる（決勝終了・途中終了）か、オーナーが解除するまで続く。
+    # サーバーに残すのは合言葉のハッシュと時刻だけ（端末の情報は持たない）。
+    @staticmethod
+    def _close_devices(t: dict) -> None:
+        t["devices"] = {}
+        t["invites"] = {}
+
+    def invite_device(self, tid: str, key: str | None, pid: str) -> str:
+        with self.lock:
+            t = self._tour(tid)
+            self._owner(t, key)
+            if t["status"] == "done":
+                raise LeagueError("終わった大会にはスマホをつなげません")
+            if pid not in t["players"]:
+                raise LeagueError("その人はこの大会に参加していません")
+            token = secrets.token_urlsafe(12)
+            t.setdefault("invites", {})[pid] = {"token": _hash(token), "at": int(time.time())}
+            self._save()
+            return token
+
+    def join_device(self, tid: str, pid: str, token: str) -> str:
+        """招待リンクを開いたスマホを、そのプレイヤーとして紐づける（招待は1回だけ使える）。"""
+        with self.lock:
+            t = self._tour(tid)
+            inv = (t.get("invites") or {}).get(pid)
+            if t["status"] == "done" or not inv or not token or \
+                    not secrets.compare_digest(_hash(token), inv["token"]):
+                raise LeagueError("このリンクは使えません（使用済み・解除済み・大会終了のどれかです）。オーナーに新しいリンクをもらってください")
+            device_key = secrets.token_urlsafe(18)
+            # 前に紐づいていたスマホがあれば、そちらは外れる（1人につき1台）
+            t.setdefault("devices", {})[pid] = {"key": _hash(device_key), "since": int(time.time())}
+            del t["invites"][pid]
+            self._save()
+            return device_key
+
+    def device_ok(self, tid: str, pid: str, device_key: str | None) -> bool:
+        t = self.data["tournaments"].get(tid)
+        d = (t.get("devices") or {}).get(pid) if t else None
+        return bool(d and device_key and secrets.compare_digest(_hash(device_key), d["key"]))
+
+    def leave_device(self, tid: str, pid: str, device_key: str | None) -> None:
+        """スマホの持ち主が自分で紐づけを外す。"""
+        with self.lock:
+            if self.device_ok(tid, pid, device_key):
+                del self.data["tournaments"][tid]["devices"][pid]
+                self._save()
+
+    def unbind_device(self, tid: str, key: str | None, pid: str | None = None) -> dict:
+        """オーナーが紐づけを強制的に解除する（pid なしで全員）。招待中のリンクも無効にする。"""
+        with self.lock:
+            t = self._tour(tid)
+            self._owner(t, key)
+            if pid is None:
+                self._close_devices(t)
+            else:
+                (t.get("devices") or {}).pop(pid, None)
+                (t.get("invites") or {}).pop(pid, None)
             self._save()
             return t
 
@@ -954,7 +1018,9 @@ class LeagueStore:
             games.sort(key=lambda g: (g["finished"], -g["created"]))
             tours = []
             for t in self.data["tournaments"].values():
-                d = {k: v for k, v in t.items() if k != "owner"}  # オーナーの合言葉（ハッシュ）は出さない
+                d = {k: v for k, v in t.items() if k not in ("owner", "devices", "invites")}  # 合言葉（ハッシュ）は出さない
+                d["devices"] = {pid: {"since": x["since"]} for pid, x in (t.get("devices") or {}).items()}
+                d["invites"] = sorted((t.get("invites") or {}).keys())
                 d["winners"] = self.block_winners(t)
                 d["formats"] = formats(len(t["players"]))
                 d["standings"] = self.tour_standings(t)

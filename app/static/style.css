@@ -189,7 +189,7 @@ button.ok { background: var(--accent); color: #fff; border-color: transparent; f
 .glass-btn { margin-left: auto; margin-right: 8px; min-height: 34px; padding: 4px 10px; font-size: .8rem; background: #000; color: #fff; border-color: #444; }
 /* 通常の画面は見えない所へ移す（カメラ映像の取り込みは続けるため display:none にはしない） */
 body.glasses { background: #000; overflow: hidden; }
-body.glasses .topbar, body.glasses .foot { display: none; }
+body.glasses .topbar, body.glasses .foot, body.glasses .taikai-me { display: none; }
 body.glasses main { position: fixed; left: -10000px; top: 0; width: 390px; pointer-events: none; }
 /* カメラ映像は小さく右下に残す（狙いを合わせる用。映像が止まらないよう画面内に置く） */
 body.glasses #viewport { position: fixed; left: auto; right: 8px; bottom: 60px; width: 96px; max-height: 30vh; z-index: 60; opacity: .55; border-radius: 6px; }
@@ -236,3 +236,7 @@ body.glasses #cameraHint { display: none; }
 .yakuman-list .tiles.small .tile { width: 22px; height: 30px; }
 .hint.yakuman .dist { background: var(--accent); color: #fff; }
 .no-nima { opacity: .55; }
+
+/* はせけん麻雀大会：このスマホがつながっているプレイヤー */
+.taikai-me { display: block; padding: 6px 12px; font-size: .82rem; font-weight: 600; text-decoration: none; background: #e8f3ec; color: #1a5d3a; border-bottom: 1px solid #cfe3d6; }
+@media (prefers-color-scheme: dark) { .taikai-me { background: #1d3327; color: #a9dcbc; border-color: #2c4a39; } }

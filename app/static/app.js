@@ -1289,3 +1289,27 @@ function init() {
   });
 }
 init();
+
+// ---------- はせけん麻雀大会：このスマホがつながっているプレイヤー ----------
+// 大会の画面（/taikai）で紐づけたとき、アシスト画面にも「あなたは◯◯」を出す。
+// 表示だけで、手牌・分析・映像は大会の画面にもサーバーの大会データにも送らない。
+(async function showTaikaiMe() {
+  let devs = {};
+  try { devs = JSON.parse(localStorage.getItem("mj-devices") || "{}") || {}; } catch (_) { return; }
+  if (!Object.keys(devs).length) return;
+  try {
+    const res = await fetch("/api/league");
+    if (!res.ok) return;
+    const data = await res.json();
+    const names = [];
+    Object.entries(devs).forEach(([tid, d]) => {
+      const t = data.tournaments.find((x) => x.id === tid);
+      const p = data.players.find((x) => x.id === d.pid);
+      if (t && p && t.status !== "done" && (t.devices || {})[d.pid]) names.push(`${p.name}（${t.name}）`);
+    });
+    const a = document.getElementById("taikaiMe");
+    if (!names.length || !a) return;
+    a.textContent = `📱 大会に参加中：${names.join("・")} ― 点数の記録は大会の画面で`;
+    a.hidden = false;
+  } catch (_) { /* 大会の表示は無くても困らない */ }
+})();
