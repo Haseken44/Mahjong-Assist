@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f5132">
+  <title>はせけん麻雀大会</title>
+  <link rel="stylesheet" href="/static/style.css?v=13">
+  <link rel="stylesheet" href="/static/league.css?v=1">
+</head>
+<body>
+  <header class="topbar">
+    <h1>はせけん麻雀大会</h1>
+    <a class="top-link" href="/">アシストへ</a>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button data-tab="tour" role="tab">大会</button>
+    <button data-tab="game" role="tab">対局・点数</button>
+    <button data-tab="rank" role="tab">成績</button>
+    <button data-tab="players" role="tab">プレイヤー</button>
+  </nav>
+
+  <main>
+    <!-- ===== 大会 ===== -->
+    <section id="tab-tour" class="tab" hidden>
+      <div id="tourView"></div>
+
+      <div id="tourSetup" class="card" hidden>
+        <h2>大会を作る <small>オーナー1人がこのスマホで設定します</small></h2>
+        <label class="field">大会名
+          <input id="tourName" type="text" maxlength="30" value="はせけん麻雀大会">
+        </label>
+        <h3 class="sub">参加者を選ぶ <small id="tourCount">0人</small></h3>
+        <p class="tip">名前とアバターを登録した人だけが選べます。まだの人は下の「＋プレイヤー登録」から。</p>
+        <div id="tourPick" class="pick-list"></div>
+        <button class="add-player-btn" data-open-register>＋プレイヤー登録</button>
+        <h3 class="sub">ブロック分け</h3>
+        <div id="tourFormats" class="formats"></div>
+        <p class="tip">各ブロック（卓）で1半荘（はんちゃん＝東場と南場）を打ち、トップの人が決勝へ進みます。決勝のトップが「キング」です。</p>
+        <div class="row"><button id="tourCreate" class="primary" disabled>抽選してブロックを決める</button></div>
+      </div>
+    </section>
+
+    <!-- ===== 対局・点数 ===== -->
+    <section id="tab-game" class="tab" hidden>
+      <div id="gameDetail" hidden>
+        <div class="card">
+          <div class="section-head">
+            <h2 id="gTitle"></h2>
+            <button id="gBack" class="small-btn">一覧へ</button>
+          </div>
+          <div id="gBoard" class="board"></div>
+          <label class="field inline-field">いまの親（おや）
+            <select id="gDealer"></select>
+          </label>
+          <p class="tip">子（こ）がアガると親は自動で次の人へ移ります。流局などで親が変わるときはここで選び直してください。</p>
+        </div>
+
+        <div class="card" id="gEntry">
+          <h2>この局の結果を記録</h2>
+          <div class="seg" role="radiogroup">
+            <label><input type="radio" name="hkind" value="ron" checked> ロン</label>
+            <label><input type="radio" name="hkind" value="tsumo"> ツモ</label>
+            <label><input type="radio" name="hkind" value="other"> 流局・その他</label>
+          </div>
+          <div class="kind-ron kind-tsumo">
+            <h3 class="sub">アガった人 <small>アバターをタップ</small></h3>
+            <div id="hWinner" class="who-pick"></div>
+          </div>
+          <div class="kind-ron">
+            <h3 class="sub">振り込んだ人（放銃者＝ほうじゅうしゃ） <small>必ず選んでください</small></h3>
+            <div id="hLoser" class="who-pick"></div>
+            <label class="field">点数（本場込み） <input id="hPoints" type="number" min="0" step="100" inputmode="numeric" placeholder="例: 7700"></label>
+          </div>
+          <div class="kind-tsumo" hidden>
+            <label class="field" id="hChildBox">子の支払い（1人あたり） <input id="hChild" type="number" min="0" step="100" inputmode="numeric" placeholder="例: 1000"></label>
+            <label class="field" id="hDealerBox">親の支払い <input id="hDealerPay" type="number" min="0" step="100" inputmode="numeric" placeholder="例: 2000"></label>
+          </div>
+          <div class="kind-ron kind-tsumo">
+            <h3 class="sub">リーチした人 <small>リーチ棒1000点はアガった人がもらいます</small></h3>
+            <div id="hRiichi" class="checks"></div>
+          </div>
+          <div class="kind-other" hidden>
+            <p class="tip">流局のノーテン罰符（ばっぷ）などは、1人ずつ点数の増減を入れます（もらう人は＋、払う人は−）。</p>
+            <div id="hDeltas" class="deltas"></div>
+            <label class="field">メモ <input id="hNote" type="text" maxlength="40" placeholder="例: 流局 テンパイ2人"></label>
+          </div>
+          <div class="row"><button id="hSave" class="primary">記録する</button></div>
+          <p class="tip">点数はアシスト画面の「点数」に出た数字をそのまま入れられます。</p>
+        </div>
+
+        <div class="card">
+          <h2>記録 <small id="gHandCount"></small></h2>
+          <ol id="gHands" class="hands"></ol>
+          <div class="row">
+            <button id="gUndo">最後の局を取り消す</button>
+            <button id="gFinish" class="ok">対局を終了</button>
+            <button id="gReopen" hidden>対局を再開</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="gameList">
+        <div class="card">
+          <h2>新しい対局 <small>大会以外でも成績を集計できます</small></h2>
+          <p class="tip">卓を囲む3人か4人をタップします。席順（東・南・西・北）は「対局を始める」で自動の抽選になります。</p>
+          <div id="newPick" class="pick-list"></div>
+          <button class="add-player-btn" data-open-register>＋プレイヤー登録</button>
+          <div class="row"><button id="newGame" class="primary" disabled>対局を始める</button></div>
+        </div>
+        <div class="card">
+          <h2>対局の一覧</h2>
+          <div id="games" class="game-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 成績 ===== -->
+    <section id="tab-rank" class="tab" hidden>
+      <div class="card">
+        <h2>個人成績 <small>1局ごとに自動で更新</small></h2>
+        <p class="tip"><b>勝ち点</b>：アガリやリーチ棒で受け取った点の合計。<b>マイナス点数</b>：振り込み（放銃）やツモられで払った点の合計。<b>合計</b>＝勝ち点＋マイナス点数。対局中の局も含みます。</p>
+        <div class="table-wrap">
+          <table class="ranking">
+            <thead><tr><th>#</th><th>プレイヤー</th><th>勝ち点</th><th>マイナス</th><th>合計</th><th>対局</th><th>トップ</th></tr></thead>
+            <tbody id="rankBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== プレイヤー ===== -->
+    <section id="tab-players" class="tab" hidden>
+      <div class="card">
+        <div class="section-head">
+          <h2>プレイヤー <small id="playerCount"></small></h2>
+          <button class="small-btn primary" data-open-register>＋登録</button>
+        </div>
+        <div id="playerList" class="player-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- プレイヤー登録（名前・アバター必須） -->
+  <dialog id="regDialog" class="sheet">
+    <form method="dialog" id="regForm">
+      <h2 id="regTitle">プレイヤー登録</h2>
+      <label class="field">名前（必須・16文字まで）
+        <input id="regName" type="text" maxlength="16" required autocomplete="nickname">
+      </label>
+      <h3 class="sub">アバター（必須） <small>写真か絵文字を選ぶ</small></h3>
+      <div class="reg-avatar">
+        <span id="regPreview" class="avatar big"></span>
+        <div class="reg-photo">
+          <label class="file-btn">写真を選ぶ・撮る<input id="regPhoto" type="file" accept="image/*" hidden></label>
+          <button type="button" id="regPhotoClear" class="small-btn" hidden>写真をやめる</button>
+        </div>
+      </div>
+      <div id="regEmojis" class="emojis"></div>
+      <p id="regError" class="note" hidden></p>
+      <div class="row">
+        <button type="button" id="regCancel">やめる</button>
+        <button type="button" id="regDelete" hidden>削除</button>
+        <button type="submit" id="regSave" class="primary">登録する</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status"></div>
+  <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
+  <script src="/static/league.js?v=1"></script>
+</body>
+</html>

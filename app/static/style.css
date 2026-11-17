@@ -218,3 +218,6 @@ body.glasses #cameraHint { display: none; }
 .g-tap { text-align: center; color: #555; font-size: 11px; }
 .g-controls { display: flex; gap: 8px; justify-content: center; padding: 8px; }
 .g-controls button { background: #111; color: #9a9a9a; border-color: #333; min-height: 40px; font-size: .85rem; }
+
+.taikai-link { text-decoration: none; color: inherit; display: inline-flex; align-items: center; }
+.taikai-link + .glass-btn { margin-left: 0; }

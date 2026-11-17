@@ -1,0 +1,688 @@
+"use strict";
+// はせけん麻雀大会・個人成績（Vanilla JS）
+// 名前・アバター・点数だけを扱う。手牌やカメラ映像はこの画面では一切使わない。
+
+const $ = (id) => document.getElementById(id);
+const SEATS = ["東", "南", "西", "北"];
+const EMOJIS = ["🀄", "🐉", "🐯", "🐼", "🦊", "🐸", "🐙", "🦁", "🐧", "🐱", "🐶", "🦉", "🐻", "🐰", "🐵", "🐨",
+  "🌸", "⭐", "🔥", "⚡", "🍀", "🍣", "🍺", "🎯"];
+const POLL_MS = 4000;
+
+const ui = {
+  data: { players: [], games: [], tournaments: [] },
+  tab: load("mj-league-tab", "tour"),
+  game: load("mj-league-game", null),     // 開いている対局
+  tourPick: new Set(),                      // 大会の参加者
+  tourBlocks: null,                         // 選んだブロック数
+  newPick: [],                              // 新しい対局の席順
+  showSetup: false,                         // 大会が終わったあと「新しい大会」を押した
+  formKey: null,                            // 入力欄を作り直すかの目印
+  winner: null,                             // この局でアガった人
+  loser: null,                              // ロンで振り込んだ人（必ず選ぶ）
+  reg: null,                                // 登録ダイアログの状態
+};
+
+// ---------- 小物 ----------
+function load(key, def) {
+  try { const v = localStorage.getItem(key); return v == null ? def : JSON.parse(v); } catch (_) { return def; }
+}
+function save(key, v) {
+  try { localStorage.setItem(key, JSON.stringify(v)); } catch (_) { /* 保存できなくても動く */ }
+}
+function ownerKeys() { return load("mj-owner-keys", {}); }
+function ownerKey(tid) { return ownerKeys()[tid] || null; }
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+function fmt(n) { return (n > 0 ? "+" : "") + n.toLocaleString("ja-JP"); }
+function pts(n) { return n.toLocaleString("ja-JP"); }
+function flash(msg, isError = true) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "toast show" + (isError ? " err" : "");
+  clearTimeout(flash.t);
+  flash.t = setTimeout(() => (t.className = "toast"), 3500);
+}
+async function api(method, path, body, headers = {}) {
+  const res = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json", ...headers },
+    body: body == null ? undefined : JSON.stringify(body),
+  });
+  let json = null;
+  try { json = await res.json(); } catch (_) { /* noop */ }
+  if (!res.ok) {
+    const d = json && json.detail;
+    throw new Error(typeof d === "string" ? d : "うまくいきませんでした。通信を確認してもう一度");
+  }
+  return json;
+}
+function player(pid) { return ui.data.players.find((p) => p.id === pid) || { id: pid, name: "（削除）", emoji: "？", stats: {} }; }
+function game(gid) { return ui.data.games.find((g) => g.id === gid); }
+function avatarEl(p, size = "") {
+  const a = el("span", "avatar " + size);
+  if (p.avatar) {
+    const img = document.createElement("img");
+    img.src = p.avatar;
+    img.alt = "";
+    img.loading = "lazy";
+    a.append(img);
+  } else {
+    a.textContent = p.emoji || "🀄";
+  }
+  return a;
+}
+function whoEl(pid, size = "") {
+  const p = player(pid);
+  const w = el("span", "who");
+  w.append(avatarEl(p, size), el("span", "name", p.name));
+  return w;
+}
+function seatName(g, i) {
+  const n = g.players.length;
+  return SEATS[(i - g.dealer + n) % n];
+}
+
+// ---------- 読み込み ----------
+async function refresh() {
+  try {
+    ui.data = await api("GET", "/api/league");
+  } catch (e) {
+    flash(e.message);
+    return;
+  }
+  render();
+}
+function render() {
+  renderTabs();
+  renderTour();
+  renderGames();
+  renderRank();
+  renderPlayers();
+}
+
+// ---------- タブ ----------
+function renderTabs() {
+  document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === ui.tab));
+  document.querySelectorAll(".tab").forEach((s) => (s.hidden = s.id !== "tab-" + ui.tab));
+}
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => {
+  ui.tab = b.dataset.tab;
+  save("mj-league-tab", ui.tab);
+  renderTabs();
+  window.scrollTo({ top: 0 });
+}));
+
+// ---------- 参加者を選ぶボタン ----------
+function pickButtons(container, isOn, orderOf, onToggle) {
+  container.replaceChildren();
+  if (!ui.data.players.length) {
+    container.append(el("p", "tip", "まだプレイヤーがいません。「＋プレイヤー登録」から名前とアバターを登録してください。"));
+    return;
+  }
+  ui.data.players.slice().sort((a, b) => a.name.localeCompare(b.name, "ja")).forEach((p) => {
+    const b = el("button");
+    b.type = "button";
+    b.setAttribute("aria-pressed", isOn(p.id));
+    b.append(avatarEl(p), el("span", "name", p.name));
+    const o = orderOf ? orderOf(p.id) : null;
+    if (o) b.append(el("span", "order", o));
+    b.addEventListener("click", () => onToggle(p.id));
+    container.append(b);
+  });
+}
+
+// ---------- 大会 ----------
+function formats(n) {
+  // サーバーの app/logic/league.py formats() と同じ考え方：ブロック数＝決勝の人数（3か4）、各ブロック3〜4人
+  const out = [];
+  [4, 3].forEach((b) => {
+    if (3 * b <= n && n <= 4 * b) {
+      const base = Math.floor(n / b), extra = n % b;
+      const sizes = [...Array(extra).fill(base + 1), ...Array(b - extra).fill(base)];
+      const kinds = [...new Set(sizes)].sort((x, y) => y - x);
+      const table = kinds.map((s) => `${s === 4 ? "四麻" : "三麻"}${sizes.filter((x) => x === s).length}卓`).join("・");
+      out.push({ blocks: b, label: `${table} → 決勝は${b === 4 ? "四麻" : "三麻"}（各ブロックのトップ${b}人）` });
+    }
+  });
+  return out;
+}
+
+function renderTour() {
+  // 進行中の大会はすべて表示。なければ最後に終わった大会（キング）と「新しい大会」
+  const ts = ui.data.tournaments;
+  const active = ts.filter((t) => t.status !== "done");
+  const last = ts.find((t) => t.status === "done") || null;
+  const showSetup = !active.length && (!last || ui.showSetup);
+  $("tourSetup").hidden = !showSetup;
+  const view = $("tourView");
+  view.replaceChildren();
+  if (last && !showSetup) view.append(tourCard(last));
+  active.forEach((t) => view.append(tourCard(t)));
+  if (showSetup) renderSetup();
+}
+
+function renderSetup() {
+  // 消えたプレイヤーは外す
+  [...ui.tourPick].forEach((pid) => { if (!ui.data.players.some((p) => p.id === pid)) ui.tourPick.delete(pid); });
+  pickButtons($("tourPick"), (pid) => ui.tourPick.has(pid), null, (pid) => {
+    if (ui.tourPick.has(pid)) ui.tourPick.delete(pid); else ui.tourPick.add(pid);
+    renderSetup();
+  });
+  const n = ui.tourPick.size;
+  $("tourCount").textContent = `${n}人`;
+  const fs = formats(n);
+  if (!fs.some((f) => f.blocks === ui.tourBlocks)) ui.tourBlocks = fs.length ? fs[0].blocks : null;
+  const box = $("tourFormats");
+  box.replaceChildren();
+  if (!fs.length) {
+    box.append(el("p", "none", n < 9
+      ? `大会は9〜16人で組めます（いま${n}人）。3〜4ブロックに分け、各ブロックのトップ3〜4人で決勝をします。`
+      : `${n}人だと3〜4ブロックに分けられません（16人まで）。`));
+  }
+  fs.forEach((f) => {
+    const l = el("label");
+    const r = document.createElement("input");
+    r.type = "radio";
+    r.name = "tourFormat";
+    r.checked = f.blocks === ui.tourBlocks;
+    r.addEventListener("change", () => { ui.tourBlocks = f.blocks; });
+    l.append(r, el("span", null, f.label));
+    box.append(l);
+  });
+  $("tourCreate").disabled = !fs.length;
+}
+
+$("tourCreate").addEventListener("click", async () => {
+  try {
+    const r = await api("POST", "/api/league/tournaments", {
+      name: $("tourName").value, players: [...ui.tourPick], blocks: ui.tourBlocks,
+    });
+    const keys = ownerKeys();
+    keys[r.tournament.id] = r.owner_key;  // このスマホがオーナー
+    save("mj-owner-keys", keys);
+    ui.showSetup = false;
+    ui.tourPick.clear();
+    flash("抽選しました。よければ「大会開始」を押してください", false);
+    await refresh();
+  } catch (e) { flash(e.message); }
+});
+
+async function ownerAction(t, path, method = "POST", okMsg = null) {
+  try {
+    await api(method, `/api/league/tournaments/${t.id}${path}`, null, { "X-Owner-Key": ownerKey(t.id) || "" });
+    if (okMsg) flash(okMsg, false);
+    await refresh();
+  } catch (e) { flash(e.message); }
+}
+
+const STATUS = { setup: "抽選済み・開始前", blocks: "ブロック戦", final: "決勝", done: "終了" };
+
+function tourCard(t) {
+  const card = el("div", "card");
+  const head = el("div", "section-head");
+  const h = el("h2", null, t.name);
+  h.append(el("small", null, STATUS[t.status]));
+  if (ownerKey(t.id)) h.append(el("span", "owner-tag", "オーナー"));
+  head.append(h);
+  card.append(head);
+  const owner = !!ownerKey(t.id);
+
+  if (t.status === "done" && t.king) {
+    const k = el("div", "king");
+    k.append(el("div", "crown", "👑"), avatarEl(player(t.king), "huge"), el("div", "title", "キング"), el("div", "name", player(t.king).name));
+    card.append(k);
+  }
+
+  const n = t.blocks.length;
+  const info = el("p", "tip", `${t.players.length}人・${n}ブロック。各ブロックのトップ${n}人が${n === 4 ? "四麻" : "三麻"}で決勝を打ち、トップが「キング」です。`);
+  card.append(info);
+
+  if (t.final_game) {
+    card.append(el("h3", "sub", "決勝"));
+    card.append(gameBlock(game(t.final_game), "決勝", null));
+  }
+
+  card.append(el("h3", "sub", t.status === "setup" ? "ブロック分け（抽選結果）" : "ブロック"));
+  const blocks = el("div", "blocks");
+  t.blocks.forEach((members, i) => {
+    const label = `${String.fromCharCode(65 + i)}ブロック（${members.length === 4 ? "四麻" : "三麻"}）`;
+    if (t.status === "setup") {
+      const b = el("div", "block");
+      b.append(el("h3", null, label));
+      members.forEach((pid, s) => {
+        const m = el("div", "member");
+        m.append(whoEl(pid), el("span", "meta", SEATS[s]));
+        b.append(m);
+      });
+      blocks.append(b);
+    } else {
+      blocks.append(gameBlock(game(t.block_games[i]), label, t.winners[i]));
+    }
+  });
+  card.append(blocks);
+
+  const row = el("div", "row");
+  if (owner && t.status === "setup") {
+    row.append(btn("抽選し直す", () => ownerAction(t, "/draw", "POST", "抽選し直しました")));
+    row.append(btn("大会開始", () => ownerAction(t, "/start", "POST", "大会を開始しました。各卓で「点数をつける」を押してください"), "primary"));
+  } else if (owner && t.status === "blocks") {
+    const left = t.winners.filter((w) => !w).length;
+    const b = btn(left ? `決勝を始める（あと${left}ブロック）` : "決勝を始める", () => ownerAction(t, "/final", "POST", "決勝の卓を作りました"), "primary");
+    b.disabled = left > 0;
+    row.append(b);
+  } else if (t.status === "done" && !ui.data.tournaments.some((x) => x.status !== "done")) {
+    row.append(btn("新しい大会を作る", () => { ui.showSetup = true; renderTour(); }, "primary"));
+  }
+  if (row.children.length) card.append(row);
+  if (owner && t.status === "setup") {
+    const del = btn("この大会をやめる", async () => {
+      if (!confirm("この大会を削除しますか？（まだ始まっていないので成績には影響しません）")) return;
+      await ownerAction(t, "", "DELETE", "大会を削除しました");
+    });
+    del.className = "small-btn";
+    card.append(del);
+  }
+  if (!owner && t.status === "setup") card.append(el("p", "tip", "オーナーが「大会開始」を押すと、各卓の点数表ができます。"));
+  if (!owner && t.status === "blocks") card.append(el("p", "tip", "全ブロックが終わったら、オーナーが決勝を始めます。"));
+  return card;
+}
+
+function btn(text, onClick, cls = "") {
+  const b = el("button", cls, text);
+  b.type = "button";
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+// 大会の1卓（ブロックまたは決勝）：いまの持ち点の順に並べる
+function gameBlock(g, label, winner) {
+  const b = el("div", "block");
+  if (!g) return b;
+  const h = el("h3", null, label);
+  h.append(el("span", "state-tag " + (g.finished ? "done" : g.hands.length ? "live" : ""), g.finished ? "終了" : g.hands.length ? `対局中・${g.hands.length}局` : "開始前"));
+  b.append(h);
+  g.order.forEach((pid, r) => {
+    const m = el("div", "member" + (pid === winner ? " win" : (!g.finished && r === 0 && g.hands.length ? " top" : "")));
+    m.append(whoEl(pid), el("span", "pts-s", pts(g.points[pid])));
+    b.append(m);
+  });
+  b.append(btn(g.finished ? "結果を見る" : "点数をつける", () => openGame(g.id), g.finished ? "" : "primary"));
+  return b;
+}
+
+// ---------- 対局 ----------
+function openGame(gid) {
+  ui.game = gid;
+  ui.formKey = null;
+  save("mj-league-game", gid);
+  ui.tab = "game";
+  save("mj-league-tab", "game");
+  render();
+  window.scrollTo({ top: 0 });
+}
+
+function renderGames() {
+  const g = ui.game && game(ui.game);
+  $("gameDetail").hidden = !g;
+  $("gameList").hidden = !!g;
+  if (g) { renderGameDetail(g); return; }
+  ui.newPick = ui.newPick.filter((pid) => ui.data.players.some((p) => p.id === pid));
+  pickButtons($("newPick"), (pid) => ui.newPick.includes(pid), null, (pid) => {
+    const i = ui.newPick.indexOf(pid);
+    if (i >= 0) ui.newPick.splice(i, 1);
+    else if (ui.newPick.length < 4) ui.newPick.push(pid);
+    else flash("1卓は4人までです");
+    renderGames();
+  });
+  const n = ui.newPick.length;
+  $("newGame").disabled = n < 3;
+  $("newGame").textContent = n < 3 ? `対局を始める（あと${3 - n}人以上）` : `${n === 4 ? "四麻" : "三麻"}で対局を始める（席は抽選）`;
+
+  const list = $("games");
+  list.replaceChildren();
+  if (!ui.data.games.length) list.append(el("p", "tip", "まだ対局はありません。"));
+  ui.data.games.forEach((g) => {
+    const b = el("button", "game-item");
+    b.type = "button";
+    const head = el("span", "head");
+    head.append(el("span", null, g.title), el("span", "state-tag " + (g.finished ? "done" : g.hands.length ? "live" : ""),
+      g.finished ? "終了" : g.hands.length ? `対局中・${g.hands.length}局` : "開始前"));
+    const line = el("span", "line");
+    g.order.forEach((pid, r) => line.append(el("span", null, `${r + 1}. ${player(pid).name} ${pts(g.points[pid])}`)));
+    b.append(head, line);
+    b.addEventListener("click", () => openGame(g.id));
+    list.append(b);
+  });
+}
+
+$("newGame").addEventListener("click", async () => {
+  try {
+    const g = await api("POST", "/api/league/games", { players: ui.newPick });
+    ui.newPick = [];
+    await refresh();
+    openGame(g.id);
+  } catch (e) { flash(e.message); }
+});
+$("gBack").addEventListener("click", () => {
+  ui.game = null;
+  save("mj-league-game", null);
+  renderGames();
+});
+
+function options(select, items, keep = true) {
+  const prev = select.value;
+  select.replaceChildren();
+  items.forEach(([v, text]) => {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = text;
+    select.append(o);
+  });
+  if (keep && items.some(([v]) => String(v) === prev)) select.value = prev;
+}
+
+function hkind() { return document.querySelector("input[name=hkind]:checked").value; }
+
+function renderGameDetail(g) {
+  $("gTitle").textContent = g.title;
+  const board = $("gBoard");
+  board.replaceChildren();
+  g.players.forEach((pid, i) => {
+    const s = el("div", "seat" + (i === g.dealer ? " dealer" : ""));
+    const rank = g.order.indexOf(pid) + 1;
+    s.append(whoEl(pid));
+    s.append(el("span", "meta", `${seatName(g, i)}家${i === g.dealer ? "（親）" : ""}・${rank}位`));
+    s.append(el("span", "pts", pts(g.points[pid])));
+    const d = g.points[pid] - g.start;
+    s.append(el("span", "diff " + (d > 0 ? "plus" : d < 0 ? "minus" : ""), `持ち点から ${fmt(d)}`));
+    board.append(s);
+  });
+
+  // 入力欄は、対局や参加者が変わったときだけ作り直す（入力中の値を消さないため）
+  const key = g.id + ":" + g.players.join(",");
+  if (ui.formKey !== key) {
+    ui.formKey = key;
+    ui.winner = null;
+    ui.loser = null;
+    const rc = $("hRiichi");
+    rc.replaceChildren();
+    const dl = $("hDeltas");
+    dl.replaceChildren();
+    g.players.forEach((pid) => {
+      const l = el("label");
+      const c = document.createElement("input");
+      c.type = "checkbox";
+      c.value = pid;
+      l.append(c, el("span", null, player(pid).name));
+      rc.append(l);
+      const dlab = el("label");
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.step = "100";
+      inp.inputMode = "numeric";
+      inp.dataset.pid = pid;
+      inp.placeholder = "0";
+      dlab.append(whoEl(pid), inp);
+      dl.append(dlab);
+    });
+  }
+  renderWhoPick(g);
+  options($("gDealer"), g.players.map((pid, i) => [i, `${player(pid).name}`]), false);
+  $("gDealer").value = String(g.dealer);
+  updateKind();
+
+  $("gEntry").hidden = g.finished;
+  $("gDealer").disabled = g.finished;
+  $("gUndo").hidden = g.finished;
+  $("gUndo").disabled = !g.hands.length;
+  $("gFinish").hidden = g.finished;
+  $("gReopen").hidden = !g.finished;
+
+  $("gHandCount").textContent = `${g.hands.length}局`;
+  const hl = $("gHands");
+  hl.replaceChildren();
+  g.hands.forEach((h) => {
+    const li = el("li");
+    let text;
+    if (h.kind === "ron") text = `${player(h.winner).name} が ${player(h.loser).name} からロン`;
+    else if (h.kind === "tsumo") text = `${player(h.winner).name} のツモ`;
+    else text = h.note || "流局・その他";
+    li.append(el("span", null, text));
+    Object.entries(h.deltas).filter(([, d]) => d).forEach(([pid, d]) => {
+      li.append(el("span", d > 0 ? "plus" : "minus", `${player(pid).name}${fmt(d)}`));
+    });
+    hl.append(li);
+  });
+  if (g.finished && g.ranks) {
+    const li = el("li");
+    li.append(el("span", null, "終了：" + g.ranks.map((pid, i) => `${i + 1}位 ${player(pid).name}`).join("、")));
+    hl.append(li);
+  }
+}
+
+// アガった人・振り込んだ人はアバターのボタンで選ぶ（ロンは振り込んだ人を必ず選ぶ）
+function renderWhoPick(g) {
+  const make = (box, isOn, isOff, onPick) => {
+    box.replaceChildren();
+    g.players.forEach((pid, i) => {
+      const b = el("button");
+      b.type = "button";
+      b.setAttribute("aria-pressed", isOn(pid));
+      b.disabled = isOff(pid);
+      b.append(avatarEl(player(pid)), el("span", "name", player(pid).name), el("span", "meta", `${seatName(g, i)}家`));
+      b.addEventListener("click", () => { onPick(pid); renderWhoPick(g); updateKind(); });
+      box.append(b);
+    });
+  };
+  make($("hWinner"), (pid) => ui.winner === pid, () => false, (pid) => {
+    ui.winner = ui.winner === pid ? null : pid;
+    if (ui.loser === ui.winner) ui.loser = null;
+  });
+  $("hLoser").classList.add("loser");
+  make($("hLoser"), (pid) => ui.loser === pid, (pid) => pid === ui.winner, (pid) => { ui.loser = ui.loser === pid ? null : pid; });
+}
+
+function updateKind() {
+  const k = hkind();
+  document.querySelectorAll("#gEntry [class*=kind-]").forEach((e) => (e.hidden = !e.classList.contains("kind-" + k)));
+  const g = ui.game && game(ui.game);
+  if (!g) return;
+  const winnerIsDealer = ui.winner === g.players[g.dealer];
+  $("hDealerBox").hidden = winnerIsDealer || k !== "tsumo";
+  $("hChildBox").firstChild.textContent = winnerIsDealer ? "全員の支払い（〇〇点オール） " : "子の支払い（1人あたり） ";
+}
+document.querySelectorAll("input[name=hkind]").forEach((r) => r.addEventListener("change", updateKind));
+
+$("gDealer").addEventListener("change", async () => {
+  try {
+    await api("POST", `/api/league/games/${ui.game}/dealer`, { seat: parseInt($("gDealer").value, 10) });
+    await refresh();
+  } catch (e) { flash(e.message); }
+});
+
+$("hSave").addEventListener("click", async () => {
+  const k = hkind();
+  const body = { kind: k };
+  if (k === "other") {
+    body.deltas = {};
+    document.querySelectorAll("#hDeltas input").forEach((i) => (body.deltas[i.dataset.pid] = parseInt(i.value, 10) || 0));
+    body.note = $("hNote").value;
+  } else {
+    if (!ui.winner) { flash("アガった人をタップして選んでください"); return; }
+    if (k === "ron" && !ui.loser) { flash("ロンは、振り込んだ人（放銃者）を必ず選んでください"); return; }
+    body.winner = ui.winner;
+    body.riichi = [...document.querySelectorAll("#hRiichi input:checked")].map((c) => c.value);
+    if (k === "ron") {
+      body.loser = ui.loser;
+      body.points = parseInt($("hPoints").value, 10) || 0;
+    } else {
+      body.pay_child = parseInt($("hChild").value, 10) || 0;
+      body.pay_dealer = parseInt($("hDealerPay").value, 10) || 0;
+    }
+  }
+  try {
+    await api("POST", `/api/league/games/${ui.game}/hands`, body);
+    ["hPoints", "hChild", "hDealerPay", "hNote"].forEach((id) => ($(id).value = ""));
+    ui.winner = null;
+    ui.loser = null;
+    document.querySelectorAll("#hRiichi input, #hDeltas input").forEach((i) => { if (i.type === "checkbox") i.checked = false; else i.value = ""; });
+    flash("記録しました。勝ち点・マイナス点数も更新されました", false);
+    await refresh();
+  } catch (e) { flash(e.message); }
+});
+
+$("gUndo").addEventListener("click", async () => {
+  if (!confirm("最後の局の記録を取り消しますか？")) return;
+  try { await api("DELETE", `/api/league/games/${ui.game}/hands/last`); await refresh(); flash("取り消しました", false); } catch (e) { flash(e.message); }
+});
+$("gFinish").addEventListener("click", async () => {
+  if (!confirm("対局を終了して順位を確定しますか？（同点は起家に近い人が上）")) return;
+  try { await api("POST", `/api/league/games/${ui.game}/finish`); await refresh(); flash("対局を終了しました", false); } catch (e) { flash(e.message); }
+});
+$("gReopen").addEventListener("click", async () => {
+  try { await api("POST", `/api/league/games/${ui.game}/reopen`); await refresh(); flash("対局を再開しました", false); } catch (e) { flash(e.message); }
+});
+
+// ---------- 成績 ----------
+function renderRank() {
+  const body = $("rankBody");
+  body.replaceChildren();
+  ui.data.players.forEach((p, i) => {
+    const s = p.stats;
+    const tr = el("tr");
+    const who = el("td");
+    who.append(whoEl(p.id));
+    if (s.kings) who.append(el("span", null, " " + "👑".repeat(Math.min(3, s.kings))));
+    tr.append(el("td", null, String(i + 1)), who,
+      el("td", s.plus ? "plus" : "", pts(s.plus)), el("td", s.minus ? "minus" : "", pts(s.minus)),
+      el("td", s.net > 0 ? "plus" : s.net < 0 ? "minus" : "", fmt(s.net)),
+      el("td", null, String(s.games)), el("td", null, String(s.tops)));
+    body.append(tr);
+  });
+  if (!ui.data.players.length) {
+    const tr = el("tr");
+    const td = el("td", null, "まだプレイヤーがいません");
+    td.colSpan = 7;
+    tr.append(td);
+    body.append(tr);
+  }
+}
+
+// ---------- プレイヤー ----------
+function renderPlayers() {
+  $("playerCount").textContent = `${ui.data.players.length}人`;
+  const list = $("playerList");
+  list.replaceChildren();
+  ui.data.players.slice().sort((a, b) => a.name.localeCompare(b.name, "ja")).forEach((p) => {
+    const b = el("button");
+    b.type = "button";
+    b.append(avatarEl(p), el("span", "name", p.name), el("span", "sub", `対局${p.stats.games}・合計${fmt(p.stats.net)}`));
+    b.addEventListener("click", () => openRegister(p));
+    list.append(b);
+  });
+  if (!ui.data.players.length) list.append(el("p", "tip", "名前とアバターを登録すると、大会や対局に参加できます。"));
+}
+
+// ---------- 登録ダイアログ ----------
+let regTarget = null; // 登録後に自動で選ぶ先（"tour" | "new"）
+
+function openRegister(p = null, target = null) {
+  regTarget = target;
+  ui.reg = { id: p ? p.id : null, emoji: p ? (p.avatar ? null : p.emoji) : null, photo: null, keepPhoto: !!(p && p.avatar), avatar: p && p.avatar };
+  $("regTitle").textContent = p ? "プレイヤーを編集" : "プレイヤー登録";
+  $("regSave").textContent = p ? "保存する" : "登録する";
+  $("regDelete").hidden = !p;
+  $("regName").value = p ? p.name : "";
+  $("regError").hidden = true;
+  $("regPhoto").value = "";
+  renderReg();
+  $("regDialog").showModal();
+  if (!p) $("regName").focus();
+}
+function renderReg() {
+  const r = ui.reg;
+  const prev = $("regPreview");
+  prev.replaceChildren();
+  if (r.photo || r.keepPhoto) {
+    const img = document.createElement("img");
+    img.src = r.photo || r.avatar;
+    img.alt = "";
+    prev.append(img);
+  } else {
+    prev.textContent = r.emoji || "？";
+  }
+  $("regPhotoClear").hidden = !(r.photo || r.keepPhoto);
+  const box = $("regEmojis");
+  box.replaceChildren();
+  EMOJIS.forEach((e) => {
+    const b = el("button", null, e);
+    b.type = "button";
+    b.setAttribute("aria-pressed", !r.photo && !r.keepPhoto && r.emoji === e);
+    b.addEventListener("click", () => { r.emoji = e; r.photo = null; r.keepPhoto = false; renderReg(); });
+    box.append(b);
+  });
+}
+document.querySelectorAll("[data-open-register]").forEach((b) => b.addEventListener("click", () => {
+  openRegister(null, b.closest("#tab-tour") ? "tour" : b.closest("#tab-game") ? "new" : null);
+}));
+$("regCancel").addEventListener("click", () => $("regDialog").close());
+$("regPhotoClear").addEventListener("click", () => { ui.reg.photo = null; ui.reg.keepPhoto = false; renderReg(); });
+
+// 写真は端末側で正方形・320px に縮めてから送る（サーバーでさらに 160px にし、位置情報などは残さない）
+$("regPhoto").addEventListener("change", () => {
+  const f = $("regPhoto").files[0];
+  if (!f) return;
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = () => {
+    const s = Math.min(img.naturalWidth, img.naturalHeight);
+    const c = document.createElement("canvas");
+    c.width = c.height = 320;
+    c.getContext("2d").drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, 320, 320);
+    ui.reg.photo = c.toDataURL("image/jpeg", 0.85);
+    ui.reg.keepPhoto = false;
+    URL.revokeObjectURL(url);
+    renderReg();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); flash("写真を読み込めませんでした"); };
+  img.src = url;
+});
+
+$("regForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const r = ui.reg;
+  const name = $("regName").value.trim();
+  const err = (m) => { $("regError").textContent = m; $("regError").hidden = false; };
+  if (!name) return err("名前を入力してください");
+  if (!r.photo && !r.keepPhoto && !r.emoji) return err("アバター（写真か絵文字）を選んでください");
+  const body = { name, emoji: r.emoji || "🀄" };
+  if (r.photo) body.photo = r.photo;
+  if (r.id && !r.photo && !r.keepPhoto) body.remove_photo = true;
+  try {
+    const p = r.id ? await api("PUT", `/api/league/players/${r.id}`, body) : await api("POST", "/api/league/players", body);
+    $("regDialog").close();
+    if (!r.id && regTarget === "tour") ui.tourPick.add(p.id);
+    if (!r.id && regTarget === "new" && ui.newPick.length < 4) ui.newPick.push(p.id);
+    flash(r.id ? "保存しました" : `${p.name} さんを登録しました`, false);
+    await refresh();
+  } catch (e) { err(e.message); }
+});
+$("regDelete").addEventListener("click", async () => {
+  const r = ui.reg;
+  if (!r.id || !confirm("このプレイヤーを削除しますか？")) return;
+  try {
+    await api("DELETE", `/api/league/players/${r.id}`);
+    $("regDialog").close();
+    await refresh();
+  } catch (e) { $("regError").textContent = e.message; $("regError").hidden = false; }
+});
+
+// ---------- 起動 ----------
+refresh();
+// 他の卓の点数も随時反映（画面を見ているときだけ）
+setInterval(() => { if (!document.hidden && !$("regDialog").open) refresh(); }, POLL_MS);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });

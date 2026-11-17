@@ -1,0 +1,114 @@
+/* はせけん麻雀大会・個人成績の画面（style.css の上に重ねる） */
+.top-link, .top-link:visited { color: #fff; font-size: .85rem; text-decoration: none; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.18); }
+.tabs {
+  position: sticky; top: 48px; z-index: 9; display: grid; grid-template-columns: repeat(4, 1fr);
+  background: var(--card); border-bottom: 1px solid var(--line);
+}
+.tabs button { border: 0; border-radius: 0; background: transparent; font-size: .85rem; padding: 8px 2px; border-bottom: 3px solid transparent; }
+.tabs button[aria-selected=true] { border-bottom-color: var(--felt-2); font-weight: 700; color: var(--felt-2); }
+.tab { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+main:has(.tabs), main { grid-template-columns: minmax(0, 1fr); }
+.tab[hidden] { display: none; }
+input[type=text] {
+  font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px; min-height: 44px; width: 100%;
+}
+.field { display: grid; gap: 4px; margin-top: 8px; font-size: .85rem; color: var(--muted); }
+.field select, .field input { width: 100%; color: var(--ink); }
+.inline-field { grid-template-columns: auto 1fr; align-items: center; gap: 8px; }
+.small-btn { min-height: 36px; padding: 4px 12px; font-size: .85rem; }
+.add-player-btn { margin-top: 8px; width: 100%; border-style: dashed; color: var(--felt-2); }
+
+/* アバター */
+.avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex: none; display: inline-grid; place-items: center;
+  background: var(--bg); border: 2px solid var(--line); font-size: 1.25rem; overflow: hidden; line-height: 1;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.avatar.big { width: 84px; height: 84px; font-size: 2.6rem; }
+.avatar.huge { width: 112px; height: 112px; font-size: 3.4rem; border: 4px solid #d4a017; }
+.who { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.who .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 参加者選び */
+.pick-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.pick-list button { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 8px; position: relative; }
+.pick-list button[aria-pressed=true] { background: var(--felt-2); color: #fff; }
+.pick-list .order { position: absolute; right: 6px; top: 4px; font-size: .75rem; font-weight: 700; }
+.formats { display: grid; gap: 6px; }
+.formats label { display: flex; gap: 8px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.formats input { width: 22px; height: 22px; }
+.formats .none { color: var(--warn); font-size: .85rem; }
+
+/* 大会 */
+.blocks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.block { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: grid; gap: 6px; }
+.block h3 { margin: 0; color: var(--ink); display: flex; justify-content: space-between; align-items: center; }
+.block .member { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .9rem; }
+.block .member.top .name::after { content: " ▲トップ"; color: var(--good); font-size: .75rem; }
+.block .member.win .name::after { content: " ★決勝へ"; color: var(--accent); font-size: .75rem; }
+.state-tag { font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); }
+.state-tag.live { background: var(--accent); color: #fff; }
+.state-tag.done { background: var(--good); color: #fff; }
+.owner-tag { font-size: .72rem; padding: 2px 8px; border-radius: 999px; background: #d4a017; color: #1d1d1b; margin-left: 6px; }
+.king { text-align: center; display: grid; justify-items: center; gap: 6px; padding: 16px 12px;
+  background: linear-gradient(180deg, #fff7d6, var(--card)); }
+.king .crown { font-size: 2.4rem; line-height: 1; }
+.king .title { font-size: 1.3rem; font-weight: 800; letter-spacing: .1em; }
+@media (prefers-color-scheme: dark) { .king { background: linear-gradient(180deg, #3a3110, var(--card)); } }
+
+/* 対局 */
+.board { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.seat { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: grid; gap: 4px; }
+.seat.dealer { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.seat .meta { font-size: .75rem; color: var(--muted); }
+.seat .pts { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.seat .diff { font-size: .8rem; font-variant-numeric: tabular-nums; }
+.plus { color: var(--good); } .minus { color: var(--accent); }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 4px; }
+.seg label { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 10px 4px; border: 1px solid var(--line); border-radius: 10px; font-size: .9rem; }
+.seg label:has(input:checked) { background: var(--felt-2); color: #fff; border-color: transparent; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.checks { display: flex; flex-wrap: wrap; gap: 6px; }
+.checks label { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: .9rem; }
+.checks input { width: 20px; height: 20px; }
+.deltas { display: grid; gap: 6px; }
+.deltas label { display: grid; grid-template-columns: 1fr 120px; align-items: center; gap: 8px; }
+.hands { margin: 0; padding-left: 1.6em; display: grid; gap: 4px; font-size: .85rem; }
+.hands li span + span { margin-left: 6px; }
+.game-list { display: grid; gap: 6px; }
+.game-item { display: grid; gap: 4px; text-align: left; padding: 8px 10px; }
+.game-item .head { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-weight: 600; }
+.game-item .line { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .8rem; color: var(--muted); }
+
+/* 成績 */
+.table-wrap { overflow-x: auto; margin: 8px -4px 0; }
+.ranking { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.ranking th, .ranking td { padding: 6px 3px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.ranking th:nth-child(2), .ranking td:nth-child(2) { text-align: left; }
+.ranking th { color: var(--muted); font-weight: 600; font-size: .75rem; }
+.ranking .who .name { max-width: 5.5em; }
+.ranking .avatar { width: 30px; height: 30px; font-size: 1rem; }
+.player-list { display: grid; gap: 6px; }
+.player-list button { display: flex; align-items: center; gap: 10px; text-align: left; }
+.player-list .sub { color: var(--muted); font-size: .78rem; margin-left: auto; }
+
+/* 登録ダイアログ */
+dialog.sheet { border: 0; border-radius: 16px; padding: 16px; width: min(92vw, 460px); background: var(--card); color: var(--ink); }
+dialog.sheet::backdrop { background: rgba(0,0,0,.5); }
+dialog.sheet h2 { margin-top: 0; }
+.reg-avatar { display: flex; align-items: center; gap: 12px; }
+.reg-photo { display: grid; gap: 6px; }
+.file-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 14px; border-radius: 10px; background: var(--felt-2); color: #fff; font-weight: 600; cursor: pointer; }
+.emojis { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-top: 10px; }
+.emojis button { font-size: 1.3rem; padding: 4px 0; min-height: 40px; }
+.emojis button[aria-pressed=true] { background: var(--felt-2); outline: 2px solid var(--felt-2); }
+
+/* アガった人・振り込んだ人をアバターで選ぶ */
+.who-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
+.who-pick button { display: grid; justify-items: center; gap: 4px; padding: 8px 4px; font-size: .8rem; }
+.who-pick button .name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who-pick button[aria-pressed=true] { background: var(--felt-2); color: #fff; border-color: transparent; }
+.who-pick.loser button[aria-pressed=true] { background: var(--accent); }
+.who-pick button:disabled { opacity: .35; }
+.who-pick .avatar { width: 44px; height: 44px; }
