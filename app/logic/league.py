@@ -548,12 +548,22 @@ class LeagueStore:
         sp = sp or {}
         return {str(n): check_start(sp.get(str(n), sp.get(n, START_POINTS[n]))) for n in (4, 3, 2)}
 
+    def _unique_name(self, name: str | None, exclude: str | None = None) -> str:
+        """大会は複数開けるので、名前がかぶったら（2）（3）…を付けて見分けられるようにする。"""
+        base = " ".join((name or "").split())[:30] or "はせけん麻雀大会"
+        used = {t["name"] for t in self.data["tournaments"].values() if t["id"] != exclude}
+        out, i = base, 2
+        while out in used:
+            out, i = f"{base}（{i}）", i + 1
+        return out
+
     def add_tournament(self, name: str, player_ids: list[str], blocks: int,
                        start_points: dict | None = None, owner_player: str | None = None) -> tuple[dict, str]:
         with self.lock:
             start_points = self._check_start_points(start_points)
             if owner_player:
                 self._player(owner_player)
+            name = self._unique_name(name)
             if len(set(player_ids)) != len(player_ids):
                 raise LeagueError("同じプレイヤーが2回選ばれています")
             for pid in player_ids:
@@ -568,7 +578,7 @@ class LeagueStore:
             tid = _new_id()
             t = {
                 "id": tid,
-                "name": " ".join((name or "").split())[:30] or "はせけん麻雀大会",
+                "name": name,
                 "players": list(player_ids),
                 "blocks": self._draw(player_ids, blocks),
                 "block_games": [],
@@ -622,11 +632,13 @@ class LeagueStore:
             t = self._tour(tid)
             self._owner(t, key)
             if name is not None:
-                t["name"] = " ".join(name.split())[:30] or t["name"]
+                if " ".join(name.split()):
+                    t["name"] = self._unique_name(name, exclude=tid)
             if owner_player is not None:
-                if owner_player:
-                    self._player(owner_player)
-                t["owner_player"] = owner_player or None
+                if not owner_player:
+                    raise LeagueError("大会ごとにオーナーを決めます。外すのではなく、別の人を選んでください")
+                self._player(owner_player)
+                t["owner_player"] = owner_player
             if start_points is not None:
                 sp = self._check_start_points(start_points)
                 changed = sp != {str(n): self.tour_start(t, n) for n in (4, 3, 2)}
@@ -771,21 +783,36 @@ class LeagueStore:
             self._save()
             return t
 
-    def latest_tournament(self) -> dict | None:
-        ts = list(self.data["tournaments"].values())
-        # 同じ秒に作られたときは後から作った方
-        return max(enumerate(ts), key=lambda it: (it[1].get("created", 0), it[0]))[1] if ts else None
+    def _key_ok(self, t: dict, keys: dict) -> bool:
+        k = keys.get(t["id"])
+        return bool(k) and secrets.compare_digest(_hash(k), t["owner"])
 
-    def reset(self, key: str | None, keep_players: bool = False) -> dict:
+    def reset_blockers(self, keys: dict | None) -> list[str]:
+        """リセットに足りないオーナー権限（大会名の一覧）。空ならリセットしてよい。
+
+        大会は複数開けるので、進行中（終了していない）の大会は全部のオーナー権限がいる
+        （ほかのオーナーの大会を勝手に消さないため）。全部終わっているときは、どれか1つの大会のオーナーならよい。
+        """
+        keys = keys or {}
+        ts = list(self.data["tournaments"].values())
+        active = [t for t in ts if t["status"] != "done"]
+        if active:
+            return [t["name"] for t in active if not self._key_ok(t, keys)]
+        if ts and not any(self._key_ok(t, keys) for t in ts):
+            return ["（終わった大会のどれか）"]
+        return []
+
+    def reset(self, keys: dict | None, keep_players: bool = False) -> dict:
         """大会・対局・成績（と、keep_players でなければプレイヤー登録）を消して最初に戻す。
 
-        大会があるときは、いちばん新しい大会のオーナーだけができる。
+        権限は reset_blockers を参照。
         消す前の中身は league.backup-<時刻>.json（写真は avatars.backup-<時刻>/）に退避するので、サーバーで戻せる。
         """
         with self.lock:
-            t = self.latest_tournament()
-            if t:
-                self._owner(t, key)
+            missing = self.reset_blockers(keys)
+            if missing:
+                raise Forbidden("リセットには、進行中のすべての大会のオーナー権限がいります（足りない大会："
+                                + "・".join(missing) + "）。その大会のオーナーに「ほかの端末でもオーナー操作」のリンクをもらうか、大会を終了してもらってください")
             stamp = time.strftime("%Y%m%d-%H%M%S")
             self.root.mkdir(parents=True, exist_ok=True)
             backup = self.root / f"league.backup-{stamp}.json"
@@ -861,6 +888,4 @@ class LeagueStore:
             tours.sort(key=lambda t: -t["created"])
             return {"players": players, "games": games, "tournaments": tours, "start_points": START_POINTS,
                     "formats": {n: formats(n) for n in range(MIN_PLAYERS, MAX_PLAYERS + 1)},
-                    "nima_yakuman": NIMA_YAKUMAN,
-                    # リセットできるのはこの大会のオーナー（大会がなければ誰でも）
-                    "latest_tournament": (self.latest_tournament() or {}).get("id")}
+                    "nima_yakuman": NIMA_YAKUMAN}

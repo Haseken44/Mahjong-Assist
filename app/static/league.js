@@ -18,7 +18,8 @@ const ui = {
   tourPick: new Set(),                      // 大会の参加者
   tourBlocks: null,                         // 選んだブロック数
   newPick: [],                              // 新しい対局の席順
-  showSetup: false,                         // 大会が終わったあと「新しい大会」を押した
+  showSetup: false,                         // 「＋新しい大会を作る」を押した
+  openTour: undefined,                      // 開いている終わった大会（undefined＝おまかせ、null＝閉じた）
   formKey: null,                            // 入力欄を作り直すかの目印
   winner: null,                             // この局でアガった人
   loser: null,                              // ロンで振り込んだ人（必ず選ぶ）
@@ -103,8 +104,10 @@ function startInput(id) {
   return v === "" ? null : parseInt(v, 10);
 }
 function ownerOptions(select, value) {
-  options(select, [["", "（選ばない）"], ...ui.data.players.slice().sort((a, b) => a.name.localeCompare(b.name, "ja")).map((p) => [p.id, p.name])], false);
-  select.value = value || "";
+  // 大会ごとにオーナーを必ず決める（未選択は「選んでください」）
+  const ps = ui.data.players.slice().sort((a, b) => a.name.localeCompare(b.name, "ja")).map((p) => [p.id, p.name]);
+  options(select, value && ps.some(([id]) => id === value) ? ps : [["", "（オーナーを選んでください）"], ...ps], false);
+  select.value = value && ps.some(([id]) => id === value) ? value : "";
 }
 function seatName(g, i) {
   const n = g.players.length;
@@ -167,21 +170,47 @@ function formats(n) {
 }
 
 function renderTour() {
-  // 進行中の大会はすべて表示。なければ最後に終わった大会（キング）と「新しい大会」
-  const ts = ui.data.tournaments;
+  // 大会はいくつでも同時に開ける。進行中の大会はすべて表示し、終わった大会は一覧から開く
+  const ts = ui.data.tournaments;  // 新しい順
   const active = ts.filter((t) => t.status !== "done");
-  const last = ts.find((t) => t.status === "done") || null;
-  const showSetup = !active.length && (!last || ui.showSetup);
+  const done = ts.filter((t) => t.status === "done");
+  const showSetup = !ts.length || ui.showSetup;
   $("tourSetup").hidden = !showSetup;
+  $("tourSetupCancel").hidden = !ts.length;
   const view = $("tourView");
   view.replaceChildren();
-  if (last && !showSetup) view.append(tourCard(last));
+  if (!showSetup) {
+    const top = el("div", "row tour-top");
+    top.append(el("span", "lbl", active.length ? `開催中の大会 ${active.length}つ` : "開催中の大会はありません"));
+    top.append(btn("＋新しい大会を作る", () => { ui.showSetup = true; renderTour(); window.scrollTo({ top: 0 }); }, "primary"));
+    view.append(top);
+  }
   active.forEach((t) => view.append(tourCard(t)));
+  if (done.length) {
+    // 終わった大会：開いている1つ（なければ、開催中がないときだけ最新）をカードで、残りは一覧で
+    const open = done.find((t) => t.id === ui.openTour) || (!active.length && ui.openTour === undefined ? done[0] : null);
+    if (open) view.append(tourCard(open));
+    const list = el("div", "card past-tours");
+    list.append(el("h2", null, "終わった大会"));
+    done.forEach((t) => {
+      const b = el("button", "game-item" + (open && open.id === t.id ? " on" : ""));
+      b.type = "button";
+      const head = el("span", "head");
+      head.append(el("span", null, t.name), el("span", "state-tag done", t.ended_early ? "途中で終了" : "終了"));
+      const line = el("span", "line");
+      line.append(el("span", null, t.king ? `👑 キング：${player(t.king).name}` : "キングなし"));
+      if (t.owner_player) line.append(el("span", null, `オーナー：${player(t.owner_player).name}`));
+      b.append(head, line);
+      b.addEventListener("click", () => { ui.openTour = open && open.id === t.id ? null : t.id; renderTour(); });
+      list.append(b);
+    });
+    view.append(list);
+  }
   if (showSetup) renderSetup();
 }
 
 function renderSetup() {
-  if (!$("tourOwner").matches(":focus")) ownerOptions($("tourOwner"), $("tourOwner").value || load("mj-owner-player", ""));
+  if (!$("tourOwner").matches(":focus")) ownerOptions($("tourOwner"), $("tourOwner").value);
   // 消えたプレイヤーは外す
   [...ui.tourPick].forEach((pid) => { if (!ui.data.players.some((p) => p.id === pid)) ui.tourPick.delete(pid); });
   pickButtons($("tourPick"), (pid) => ui.tourPick.has(pid), null, (pid) => {
@@ -209,22 +238,26 @@ function renderSetup() {
     l.append(r, el("span", null, f.label));
     box.append(l);
   });
-  $("tourCreate").disabled = !fs.length;
+  $("tourCreate").disabled = !fs.length || !$("tourOwner").value;
+  $("tourOwnerNote").hidden = !!$("tourOwner").value;
 }
+$("tourOwner").addEventListener("change", () => renderSetup());
+$("tourSetupCancel").addEventListener("click", () => { ui.showSetup = false; renderTour(); });
 
 $("tourCreate").addEventListener("click", async () => {
   try {
     const r = await api("POST", "/api/league/tournaments", {
       name: $("tourName").value, players: [...ui.tourPick], blocks: ui.tourBlocks,
-      owner_player: $("tourOwner").value || null,
+      owner_player: $("tourOwner").value,
       start_points: { 4: startInput("tourStart4") ?? 25000, 3: startInput("tourStart3") ?? 35000, 2: startInput("tourStart2") ?? 25000 },
     });
-    save("mj-owner-player", $("tourOwner").value);
     const keys = ownerKeys();
     keys[r.tournament.id] = r.owner_key;  // このスマホがオーナー
     save("mj-owner-keys", keys);
     ui.showSetup = false;
+    ui.openTour = null;
     ui.tourPick.clear();
+    $("tourOwner").value = "";  // 次の大会のオーナーは改めて選ぶ
     flash("抽選しました。よければ「大会開始」を押してください", false);
     await refresh();
   } catch (e) { flash(e.message); }
@@ -321,8 +354,6 @@ function tourCard(t) {
     const b = btn(left ? `決勝を始める（あと${left}ブロック）` : "決勝を始める", () => ownerAction(t, "/final", "POST", "決勝の卓を作りました"), "primary");
     b.disabled = left > 0;
     row.append(b);
-  } else if (t.status === "done" && !ui.data.tournaments.some((x) => x.status !== "done")) {
-    row.append(btn("新しい大会を作る", () => { ui.showSetup = true; renderTour(); }, "primary"));
   }
   if (row.children.length) card.append(row);
   if (owner) {
@@ -754,11 +785,23 @@ function renderPlayers() {
     list.append(b);
   });
   if (!ui.data.players.length) list.append(el("p", "tip", "名前とアバターを登録すると、大会や対局に参加できます。"));
-  const lt = ui.data.latest_tournament;
-  const can = !lt || !!ownerKey(lt);
-  $("resetOpen").disabled = !can;
-  $("resetNote").hidden = can;
-  $("resetNote").textContent = "リセットは、いちばん新しい大会のオーナーの端末でだけできます（オーナーの🇯🇵の人に頼んでください）。";
+  const missing = resetBlockers();
+  $("resetOpen").disabled = missing.length > 0;
+  $("resetNote").hidden = !missing.length;
+  $("resetNote").textContent = `リセットすると全部の大会が消えるので、進行中のすべての大会のオーナー権限がいります。この端末にないもの：${missing.join("・")}（その大会のオーナーに「大会を終了する」か「ほかの端末でもオーナー操作」のリンクを頼んでください）`;
+}
+
+// サーバーの reset_blockers と同じ考え方：進行中の大会は全部のオーナー権限、全部終わっていればどれか1つ
+function resetBlockers() {
+  const ts = ui.data.tournaments;
+  const active = ts.filter((t) => t.status !== "done");
+  if (active.length) return active.filter((t) => !ownerKey(t.id)).map((t) => t.name);
+  if (ts.length && !ts.some((t) => ownerKey(t.id))) return ["終わった大会のどれか"];
+  return [];
+}
+function myOwnerKeys() {
+  const keys = ownerKeys();
+  return Object.fromEntries(ui.data.tournaments.filter((t) => keys[t.id]).map((t) => [t.id, keys[t.id]]));
 }
 
 // ---------- リセット（最初からやり直す） ----------
@@ -774,10 +817,8 @@ $("resetCancel").addEventListener("click", () => $("resetDialog").close());
 $("resetForm").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const keep = document.querySelector("input[name=resetKind]:checked").value === "keep";
-  const lt = ui.data.latest_tournament;
   try {
-    await api("POST", "/api/league/reset", { confirm: $("resetWord").value.trim(), keep_players: keep },
-      lt ? { "X-Owner-Key": ownerKey(lt) || "" } : {});
+    await api("POST", "/api/league/reset", { confirm: $("resetWord").value.trim(), keep_players: keep, owner_keys: myOwnerKeys() });
   } catch (e) {
     $("resetError").textContent = e.message;
     $("resetError").hidden = false;
@@ -786,7 +827,7 @@ $("resetForm").addEventListener("submit", async (ev) => {
   $("resetDialog").close();
   save("mj-owner-keys", {});
   save("mj-league-game", null);
-  Object.assign(ui, { game: null, edit: null, showSetup: false, editHand: null, newPick: [] });
+  Object.assign(ui, { game: null, edit: null, showSetup: false, editHand: null, newPick: [], openTour: undefined });
   ui.tourPick.clear();
   ui.tab = keep ? "tour" : "players";
   save("mj-league-tab", ui.tab);
@@ -1001,7 +1042,7 @@ function editView(t) {
   const row = el("div", "row");
   row.append(btn("やめる", () => { ui.edit = null; renderTour(); }));
   row.append(btn("保存する", async () => {
-    const body = { name: e.name, owner_player: e.owner };
+    const body = { name: e.name, owner_player: e.owner || null };
     if (canBlocks) body.blocks = e.blocks;
     if (t.status !== "done") body.start_points = e.start;
     try {
@@ -1054,7 +1095,7 @@ function entriesView(t) {
     try {
       const H = { "X-Owner-Key": ownerKey(t.id) || "" };
       await api("POST", `/api/league/tournaments/${t.id}/entries`, { players: [...e.pick], blocks: e.nb }, H);
-      await api("PATCH", `/api/league/tournaments/${t.id}`, { name: e.name, owner_player: e.owner, start_points: e.start }, H);
+      await api("PATCH", `/api/league/tournaments/${t.id}`, { name: e.name, owner_player: e.owner || null, start_points: e.start }, H);
       ui.edit = null;
       flash("参加者を変えて抽選し直しました", false);
       await refresh();
