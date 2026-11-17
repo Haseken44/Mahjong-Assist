@@ -211,3 +211,9 @@ button:disabled.danger { opacity: .45; }
 /* 参加しない運営だけのオーナー */
 .who.staff .avatar { display: inline-flex; align-items: center; justify-content: center; }
 .staff-tag { font-size: .68rem; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--muted); color: #fff; margin-left: 4px; white-space: nowrap; }
+
+/* 記録の保存・公開の成績ページへのリンク */
+.save-row { flex-wrap: wrap; }
+.link-btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: inherit; flex: 1 1 auto; text-align: center; min-height: 36px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); font-size: .85rem; }
+.topbar h1 + .top-link { margin-left: auto; }
+.topbar .top-link + .top-link { margin-left: 6px; }

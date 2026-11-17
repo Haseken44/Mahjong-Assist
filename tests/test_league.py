@@ -584,3 +584,57 @@ def test_api_staff_owner(tmp_path, monkeypatch):
     assert r.status_code == 200 and r.json()["tournament"]["owner_name"] == "PCの人"
     s = client.get("/api/league").json()
     assert len(s["players"]) == 3  # 運営者はプレイヤーにも成績にも入らない
+
+
+def _played_store(tmp_path):
+    s = LeagueStore(tmp_path)
+    ids = _players(s, 5)
+    s.update_player(ids[0], name="あおい<b>")
+    t, key = s.add_tournament("秋の大会", ids, 2, owner_name="運営PC")
+    dk = s.join_device(t["id"], ids[1], s.invite_device(t["id"], key, ids[1]))
+    s.start_tournament(t["id"], key)
+    for gid in t["block_games"]:
+        g = s.data["games"][gid]
+        s.add_hand(gid, {"kind": "ron", "winner": g["players"][1], "loser": g["players"][0],
+                         "points": 32000 if len(g["players"]) == 2 else 8000, "note": "メモ"})
+        s.finish_game(gid)
+    s.start_final(t["id"], key)
+    f = s.data["games"][t["final_game"]]
+    s.add_hand(f["id"], {"kind": "tsumo", "winner": f["players"][1], "pay_child": 32000})
+    return s, t, key, dk
+
+
+def test_tournament_markdown(tmp_path):
+    from app.logic.league_report import ranking_markdown, tournament_markdown
+    s, t, key, _ = _played_store(tmp_path)
+    fname, md = tournament_markdown(s, t["id"])
+    assert fname.endswith("_秋の大会.md") and md.startswith("# 秋の大会")
+    assert "## 大会の成績" in md and "## Aブロック" in md and "## 決勝" in md and "運営PC（運営・参加しない）" in md
+    assert "ロン" in md and "ツモ" in md and "メモ" in md
+    assert key not in md and "owner" not in md
+    fname2, md2 = ranking_markdown(s)
+    assert fname2.endswith("_通算成績.md") and "# はせけん麻雀大会 通算成績" in md2 and "秋の大会" in md2
+
+
+def test_public_seiseki_pages_are_read_only(tmp_path, monkeypatch):
+    import app.league_api as api
+    import app.league_public as pub
+    s, t, key, dk = _played_store(tmp_path)
+    monkeypatch.setattr(api, "store", s)
+    monkeypatch.setattr(pub, "store", s)
+    client = TestClient(app)
+    r = client.get("/seiseki", follow_redirects=False)
+    assert r.status_code in (301, 302, 307) and r.headers["location"] == "/seiseki/"
+    r = client.get("/seiseki/")
+    assert r.status_code == 200 and "秋の大会" in r.text and "通算成績" in r.text
+    assert "あおい&lt;b&gt;" in r.text and "あおい<b>" not in r.text  # 名前はエスケープ
+    d = client.get(f"/seiseki/{t['id']}")
+    assert d.status_code == 200 and "Aブロック" in d.text and "決勝" in d.text and "export.md" in d.text
+    for page in (r.text, d.text):
+        assert key not in page and dk not in page and "X-Owner-Key" not in page and "<form" not in page and "<script" not in page
+    assert client.get("/seiseki/nothing").status_code == 404
+    m = client.get(f"/api/league/tournaments/{t['id']}/export.md")
+    assert m.status_code == 200 and m.headers["content-type"].startswith("text/markdown")
+    assert "attachment" in m.headers["content-disposition"] and "filename*=UTF-8''" in m.headers["content-disposition"]
+    assert client.get("/api/league/export.md").status_code == 200
+    assert client.get("/api/league/tournaments/nothing/export.md").status_code == 404

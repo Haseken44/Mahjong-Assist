@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from .league_api import router as league_router
+from .league_public import router as public_router
 from .logic import tiles as T
 from .logic.analyzer import analyze
 from .logic.settings import RoundSettings
@@ -39,6 +40,7 @@ MAX_FRAME_BYTES = 3 * 1024 * 1024
 
 app = FastAPI(title="Mahjong Vision Assist", version="0.5.0")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.include_router(public_router)  # 公開の成績ページ /seiseki/ と Markdown 書き出し（閲覧専用）
 app.include_router(league_router)
 detector = load_detector()
 

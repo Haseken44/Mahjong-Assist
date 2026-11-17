@@ -6,11 +6,12 @@
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
   <link rel="stylesheet" href="/static/style.css?v=15">
-  <link rel="stylesheet" href="/static/league.css?v=12">
+  <link rel="stylesheet" href="/static/league.css?v=13">
 </head>
 <body>
   <header class="topbar">
     <h1>はせけん麻雀大会</h1>
+    <a class="top-link" href="/seiseki/" target="_blank">公開の成績</a>
     <a class="top-link" href="/">アシストへ</a>
   </header>
 
@@ -163,6 +164,10 @@
             <tbody id="rankBody"></tbody>
           </table>
         </div>
+        <div class="row save-row">
+          <a class="small-btn link-btn" href="/api/league/export.md">📄 通算成績を Markdown で保存</a>
+          <a class="small-btn link-btn" href="/seiseki/" target="_blank">🌐 公開の成績ページ</a>
+        </div>
       </div>
     </section>
 
@@ -262,6 +267,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=11"></script>
+  <script src="/static/league.js?v=12"></script>
 </body>
 </html>
