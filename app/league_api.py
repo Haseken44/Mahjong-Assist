@@ -137,6 +137,16 @@ async def undo_hand(gid: str) -> dict:
     return await _run(store.undo_hand, gid)
 
 
+@router.put("/api/league/games/{gid}/hands/{index}")
+async def edit_hand(gid: str, index: int, req: HandIn) -> dict:
+    return await _run(store.edit_hand, gid, index, req.model_dump())
+
+
+@router.delete("/api/league/games/{gid}/hands/{index}")
+async def delete_hand(gid: str, index: int) -> dict:
+    return await _run(store.delete_hand, gid, index)
+
+
 class DealerIn(BaseModel):
     seat: int
 

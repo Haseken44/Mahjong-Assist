@@ -285,8 +285,8 @@ class LeagueStore:
             raise LeagueError(f"{what}が大きすぎるか、マイナスです")
         return v
 
-    def add_hand(self, gid: str, hand: dict) -> dict:
-        """1局の結果を記録する。
+    def _build_hand(self, g: dict, hand: dict, dealer: int) -> dict:
+        """1局の入力から点数の増減を計算した記録を作る（dealer＝その局の親の席）。
 
         hand = {kind: "ron"|"tsumo"|"other", winner, loser, points, pay_child, pay_dealer, riichi: [pid], deltas: {pid: int}}
         - ron   : 放銃者(loser)が points（本場込み）を和了者に払う
@@ -294,89 +294,146 @@ class LeagueStore:
         - other : 流局・罰符など。deltas に各プレイヤーの増減を直接入れる
         リーチ棒（riichi に入れた人が 1000 点ずつ）はアガった人が受け取る。
         """
+        pl = g["players"]
+        kind = hand.get("kind")
+        deltas = {pid: 0 for pid in pl}
+        winner = hand.get("winner")
+        loser = None
+        riichi: list[str] = []
+        pts = child = dealer_pay = None
+        if kind in ("ron", "tsumo"):
+            if winner not in pl:
+                raise LeagueError("アガった人を選んでください")
+            if kind == "ron":
+                loser = hand.get("loser")
+                if loser not in pl or loser == winner:
+                    raise LeagueError("振り込んだ人（放銃者）を選んでください")
+                pts = self._amount(hand.get("points"), "点数")
+                if pts == 0:
+                    raise LeagueError("点数を入力してください")
+                deltas[winner] += pts
+                deltas[loser] -= pts
+            else:
+                dealer_id = pl[dealer]
+                child = self._amount(hand.get("pay_child"), "子の支払い")
+                dealer_pay = child if winner == dealer_id else self._amount(hand.get("pay_dealer"), "親の支払い")
+                if child == 0 or dealer_pay == 0:
+                    raise LeagueError("ツモの支払い点数を入力してください")
+                for pid in pl:
+                    if pid != winner:
+                        pay = dealer_pay if pid == dealer_id else child
+                        deltas[pid] -= pay
+                        deltas[winner] += pay
+            riichi = sorted({pid for pid in (hand.get("riichi") or []) if pid in pl})
+            for pid in riichi:
+                deltas[pid] -= 1000
+                deltas[winner] += 1000
+        elif kind == "other":
+            raw = hand.get("deltas") or {}
+            for pid in pl:
+                try:
+                    v = int(raw.get(pid) or 0)
+                except (TypeError, ValueError):
+                    raise LeagueError("点数の増減を数字で入力してください") from None
+                if abs(v) > MAX_POINTS:
+                    raise LeagueError("点数の増減が大きすぎます")
+                deltas[pid] = v
+            if not any(deltas.values()):
+                raise LeagueError("点数の増減を入力してください")
+            winner = None
+        else:
+            raise LeagueError("ロン・ツモ・その他から選んでください")
+        return {
+            "kind": kind,
+            "winner": winner,
+            "loser": loser,
+            "points": pts,            # 直すときに入力欄へ戻すため、入力もそのまま残す
+            "pay_child": child,
+            "pay_dealer": dealer_pay,
+            "riichi": riichi,
+            "deltas": deltas,
+            "dealer_before": dealer,
+            "note": (hand.get("note") or "").strip()[:40],
+            "at": int(time.time()),
+        }
+
+    @staticmethod
+    def _next_dealer(g: dict, rec: dict) -> int:
+        """子がアガったら親が次の人へ（親がアガったら連荘）。流局などは画面で親を選び直す。"""
+        pl = g["players"]
+        d = rec["dealer_before"]
+        if rec["winner"] is not None and pl.index(rec["winner"]) != d:
+            return (d + 1) % len(pl)
+        return d
+
+    @staticmethod
+    def _recount(g: dict) -> None:
+        """記録した局から持ち点を数え直す。"""
+        g["points"] = {pid: g["start"] for pid in g["players"]}
+        for h in g["hands"]:
+            for pid, d in h["deltas"].items():
+                g["points"][pid] += d
+
+    def _editable(self, g: dict) -> None:
+        if g["finished"]:
+            raise LeagueError("この対局は終了しています。記録や修正をするには「対局を再開」を押してください")
+
+    def add_hand(self, gid: str, hand: dict) -> dict:
+        """1局の結果を記録する（入力の形は _build_hand）。"""
         with self.lock:
             g = self._game(gid)
-            if g["finished"]:
-                raise LeagueError("この対局は終了しています。記録するには「対局を再開」を押してください")
-            pl = g["players"]
-            kind = hand.get("kind")
-            deltas = {pid: 0 for pid in pl}
-            winner = hand.get("winner")
-            loser = None
-            if kind in ("ron", "tsumo"):
-                if winner not in pl:
-                    raise LeagueError("アガった人を選んでください")
-                if kind == "ron":
-                    loser = hand.get("loser")
-                    if loser not in pl or loser == winner:
-                        raise LeagueError("振り込んだ人（放銃者）を選んでください")
-                    pts = self._amount(hand.get("points"), "点数")
-                    if pts == 0:
-                        raise LeagueError("点数を入力してください")
-                    deltas[winner] += pts
-                    deltas[loser] -= pts
-                else:
-                    dealer_id = pl[g["dealer"]]
-                    child = self._amount(hand.get("pay_child"), "子の支払い")
-                    dealer_pay = child if winner == dealer_id else self._amount(hand.get("pay_dealer"), "親の支払い")
-                    if child == 0 or dealer_pay == 0:
-                        raise LeagueError("ツモの支払い点数を入力してください")
-                    for pid in pl:
-                        if pid != winner:
-                            pay = dealer_pay if pid == dealer_id else child
-                            deltas[pid] -= pay
-                            deltas[winner] += pay
-                riichi = [pid for pid in (hand.get("riichi") or []) if pid in pl]
-                for pid in set(riichi):
-                    deltas[pid] -= 1000
-                    deltas[winner] += 1000
-            elif kind == "other":
-                raw = hand.get("deltas") or {}
-                for pid in pl:
-                    try:
-                        v = int(raw.get(pid) or 0)
-                    except (TypeError, ValueError):
-                        raise LeagueError("点数の増減を数字で入力してください") from None
-                    if abs(v) > MAX_POINTS:
-                        raise LeagueError("点数の増減が大きすぎます")
-                    deltas[pid] = v
-                if not any(deltas.values()):
-                    raise LeagueError("点数の増減を入力してください")
-                winner = None
-            else:
-                raise LeagueError("ロン・ツモ・その他から選んでください")
-
-            rec = {
-                "kind": kind,
-                "winner": winner,
-                "loser": loser,
-                "deltas": deltas,
-                "dealer_before": g["dealer"],
-                "note": (hand.get("note") or "").strip()[:40],
-                "at": int(time.time()),
-            }
-            for pid, d in deltas.items():
-                g["points"][pid] += d
-            # 子がアガったら親が次の人へ（親がアガったら連荘）。流局などは画面で親を選び直す
-            if winner is not None and pl.index(winner) != g["dealer"]:
-                g["dealer"] = (g["dealer"] + 1) % len(pl)
+            self._editable(g)
+            rec = self._build_hand(g, hand, g["dealer"])
             g["hands"].append(rec)
+            self._recount(g)
+            g["dealer"] = self._next_dealer(g, rec)
+            self._save()
+            return g
+
+    def _hand_index(self, g: dict, index) -> int:
+        if not isinstance(index, int) or not 0 <= index < len(g["hands"]):
+            raise LeagueError("その局の記録は見つかりません")
+        return index
+
+    def edit_hand(self, gid: str, index: int, hand: dict) -> dict:
+        """記録した局を直す（ロンの相手を間違えた、点数を打ち間違えた など）。
+
+        その局の親はそのまま。直したのが最後の局なら、次の親も直した結果で決め直す。
+        """
+        with self.lock:
+            g = self._game(gid)
+            self._editable(g)
+            i = self._hand_index(g, index)
+            old = g["hands"][i]
+            rec = self._build_hand(g, hand, old["dealer_before"])
+            rec["at"] = old.get("at", rec["at"])
+            rec["edited"] = int(time.time())
+            g["hands"][i] = rec
+            self._recount(g)
+            if i == len(g["hands"]) - 1 and g["dealer"] == self._next_dealer(g, old):
+                g["dealer"] = self._next_dealer(g, rec)
+            self._save()
+            return g
+
+    def delete_hand(self, gid: str, index: int) -> dict:
+        """記録した局を消す（間違えて記録した局など）。"""
+        with self.lock:
+            g = self._game(gid)
+            self._editable(g)
+            i = self._hand_index(g, index)
+            rec = g["hands"].pop(i)
+            self._recount(g)
+            if i == len(g["hands"]):  # 最後の局を消したら親も戻す
+                g["dealer"] = rec["dealer_before"]
             self._save()
             return g
 
     def undo_hand(self, gid: str) -> dict:
         with self.lock:
             g = self._game(gid)
-            if g["finished"]:
-                raise LeagueError("終了した対局は取り消せません。先に「対局を再開」を押してください")
             if not g["hands"]:
                 raise LeagueError("取り消す局がありません")
-            rec = g["hands"].pop()
-            for pid, d in rec["deltas"].items():
-                g["points"][pid] -= d
-            g["dealer"] = rec["dealer_before"]
-            self._save()
-            return g
+            return self.delete_hand(gid, len(g["hands"]) - 1)
 
     def set_dealer(self, gid: str, seat: int) -> dict:
         with self.lock:

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
   <link rel="stylesheet" href="/static/style.css?v=13">
-  <link rel="stylesheet" href="/static/league.css?v=3">
+  <link rel="stylesheet" href="/static/league.css?v=5">
 </head>
 <body>
   <header class="topbar">
@@ -72,7 +72,8 @@
         </div>
 
         <div class="card" id="gEntry">
-          <h2>この局の結果を記録</h2>
+          <h2 id="hTitle">この局の結果を記録</h2>
+          <p id="hEditBar" class="edit-bar" hidden></p>
           <div class="seg" role="radiogroup">
             <label><input type="radio" name="hkind" value="ron" checked> ロン</label>
             <label><input type="radio" name="hkind" value="tsumo"> ツモ</label>
@@ -100,8 +101,12 @@
             <div id="hDeltas" class="deltas"></div>
             <label class="field">メモ <input id="hNote" type="text" maxlength="40" placeholder="例: 流局 テンパイ2人"></label>
           </div>
-          <div class="row"><button id="hSave" class="primary">記録する</button></div>
-          <p class="tip">点数はアシスト画面の「点数」に出た数字をそのまま入れられます。</p>
+          <div class="row">
+            <button id="hCancel" hidden>やめる</button>
+            <button id="hDelete" class="danger" hidden>削除</button>
+            <button id="hSave" class="primary">記録する</button>
+          </div>
+          <p class="tip">点数はアシスト画面の「点数」に出た数字をそのまま入れられます。ロンの相手などを間違えたときは、下の「記録」で「直す」を押してください。</p>
         </div>
 
         <div class="card">
@@ -186,6 +191,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=3"></script>
+  <script src="/static/league.js?v=4"></script>
 </body>
 </html>

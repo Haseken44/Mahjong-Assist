@@ -253,3 +253,41 @@ def test_start_points_and_owner_flag(store):
     assert g["start"] == 30000
     store.set_game_start(g["id"], 27000)
     assert set(g["points"].values()) == {27000}
+
+
+def test_fix_wrong_ron_target(store):
+    a, b, c, d = _players(store, 4)
+    g = store.add_game([a, b, c, d], shuffle=False)
+    store.add_hand(g["id"], {"kind": "ron", "winner": b, "loser": c, "points": 3900, "riichi": [d]})
+    store.add_hand(g["id"], {"kind": "tsumo", "winner": c, "pay_child": 1000, "pay_dealer": 2000})  # 親は b
+    assert g["hands"][0]["points"] == 3900 and g["hands"][0]["riichi"] == [d]
+    # 1局目のロンの相手は c ではなく a だった
+    store.edit_hand(g["id"], 0, {"kind": "ron", "winner": b, "loser": a, "points": 3900, "riichi": [d]})
+    assert g["points"] == {a: 20100, b: 27900, c: 29000, d: 23000}
+    assert sum(g["points"].values()) == 100000 and g["hands"][0]["edited"]
+    s = store.stats()
+    assert s[a]["deal_ins"] == 1 and s[c]["deal_ins"] == 0
+    # 最後の局を直すと次の親も決め直す（子 c のツモ → 親流れ。親 b のツモに直すと連荘）
+    assert g["dealer"] == 2
+    store.edit_hand(g["id"], 1, {"kind": "tsumo", "winner": b, "pay_child": 2000})
+    assert g["dealer"] == 1 and g["points"] == {a: 19100, b: 35900, c: 23000, d: 22000}
+    # 途中の局を消す
+    store.delete_hand(g["id"], 0)
+    assert len(g["hands"]) == 1 and g["points"] == {a: 23000, b: 31000, c: 23000, d: 23000}
+    with pytest.raises(LeagueError):
+        store.edit_hand(g["id"], 5, {"kind": "other", "deltas": {a: 1000}})
+    store.finish_game(g["id"])
+    with pytest.raises(LeagueError):
+        store.edit_hand(g["id"], 0, {"kind": "other", "deltas": {a: 1000, b: -1000}})
+
+
+def test_league_api_edit_hand():
+    client = TestClient(app)
+    ids = [client.post("/api/league/players", json={"name": f"修正{i}", "emoji": "🐸"}).json()["id"] for i in range(3)]
+    g = client.post("/api/league/games", json={"players": ids}).json()
+    a, b, c = g["players"]
+    client.post(f"/api/league/games/{g['id']}/hands", json={"kind": "ron", "winner": a, "loser": b, "points": 8000})
+    r = client.put(f"/api/league/games/{g['id']}/hands/0", json={"kind": "ron", "winner": a, "loser": c, "points": 8000})
+    assert r.status_code == 200 and r.json()["points"][b] == 35000 and r.json()["points"][c] == 27000
+    assert client.delete(f"/api/league/games/{g['id']}/hands/last").status_code == 200
+    assert client.delete(f"/api/league/games/{g['id']}/hands/0").status_code == 400
