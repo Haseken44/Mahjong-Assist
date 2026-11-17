@@ -825,12 +825,16 @@ class LeagueStore:
             return {"backup": backup.name, "players": len(players)}
 
     # ---------- 集計 ----------
-    def stats(self) -> dict[str, dict]:
-        """個人成績（対局中の局も含めて随時集計）。"""
+    def stats(self, games: list[dict] | None = None, pids=None) -> dict[str, dict]:
+        """個人成績（対局中の局も含めて随時集計）。
+
+        games を渡すとその対局だけ（大会ごとの成績表など）、省略すると全部の対局（通算）を数える。
+        """
+        whole = games is None
         out = {pid: {"plus": 0, "minus": 0, "net": 0, "hands": 0, "wins": 0, "deal_ins": 0,
                      "games": 0, "finished": 0, "tops": 0, "rank_sum": 0, "kings": 0}
-               for pid in self.data["players"]}
-        for g in self.data["games"].values():
+               for pid in (self.data["players"] if pids is None else pids)}
+        for g in (self.data["games"].values() if whole else games):
             for pid in g["players"]:
                 if pid in out:
                     out[pid]["games"] += 1
@@ -854,7 +858,7 @@ class LeagueStore:
                         out[pid]["finished"] += 1
                         out[pid]["rank_sum"] += i + 1
                         out[pid]["tops"] += i == 0
-        for t in self.data["tournaments"].values():
+        for t in self.data["tournaments"].values() if whole else ():
             if t.get("king") in out:
                 out[t["king"]]["kings"] += 1
         for s in out.values():
@@ -862,6 +866,75 @@ class LeagueStore:
             s["avg_rank"] = round(s["rank_sum"] / s["finished"], 2) if s["finished"] else None
             del s["rank_sum"]
         return out
+
+    def _tour_games(self, t: dict) -> list[dict]:
+        gids = [*t["block_games"], t["final_game"]]
+        return [self.data["games"][gid] for gid in gids if gid and gid in self.data["games"]]
+
+    def tour_result(self, t: dict, pid: str) -> str:
+        """その大会でのプレイヤーの結果（キング・決勝○位・Aブロック○位など）。"""
+        if t.get("king") == pid:
+            return "👑 キング"
+        final = self.data["games"].get(t["final_game"]) if t["final_game"] else None
+        single = len(t["blocks"]) == 1
+        if final and pid in final["players"]:
+            if final.get("aborted"):
+                return "決勝（打ち切り）"
+            if final["finished"] and final["ranks"]:
+                return f"決勝{final['ranks'].index(pid) + 1}位"
+            return "決勝 対局中"
+        for i, members in enumerate(t["blocks"]):
+            if pid not in members:
+                continue
+            label = "決勝" if single else f"{chr(65 + i)}ブロック"
+            g = self.data["games"].get(t["block_games"][i]) if i < len(t["block_games"]) else None
+            if not g:
+                return "開始前" if t["status"] == "setup" else label
+            if g.get("aborted"):
+                return f"{label}（打ち切り）"
+            if g["finished"] and g["ranks"]:
+                return f"{label}{g['ranks'].index(pid) + 1}位"
+            return f"{label} 対局中"
+        return "—"
+
+    def tour_standings(self, t: dict) -> list[dict]:
+        """大会ごとの成績表。その大会の対局だけを数えるので、新しい大会は0から始まる。"""
+        st = self.stats(self._tour_games(t), t["players"])
+        rows = [{"id": pid, **st[pid], "result": self.tour_result(t, pid)} for pid in t["players"]]
+        final = self.data["games"].get(t["final_game"]) if t["final_game"] else None
+        block_rank = {}
+        for gid in t["block_games"]:
+            g = self.data["games"].get(gid)
+            if g and g["finished"] and g["ranks"]:
+                block_rank.update({pid: i for i, pid in enumerate(g["ranks"])})
+
+        def order(r):
+            # キング → 決勝の順位 → ブロックの順位 → 合計点
+            pid = r["id"]
+            if t.get("king") == pid:
+                return (0, 0, -r["net"])
+            if final and pid in final["players"]:
+                rk = final["ranks"].index(pid) if final["finished"] and final["ranks"] else 9
+                return (1, rk, -r["net"])
+            return (2, block_rank.get(pid, 9), -r["net"])
+        rows.sort(key=order)
+        return rows
+
+    def player_history(self, pid: str) -> dict:
+        """プレイヤーの成績：通算・大会ごとの履歴・大会以外の対局。大会が終わったあとも見られる。"""
+        with self.lock:
+            p = self._player(pid)
+            tours = []
+            for t in sorted(self.data["tournaments"].values(), key=lambda t: -t["created"]):
+                if pid not in t["players"]:
+                    continue
+                st = self.stats(self._tour_games(t), [pid])[pid]
+                tours.append({"id": t["id"], "name": t["name"], "status": t["status"],
+                              "ended_early": bool(t.get("ended_early")), "created": t["created"],
+                              "players": len(t["players"]), "result": self.tour_result(t, pid), "stats": st})
+            free = [g for g in self.data["games"].values() if not g["tournament"]]
+            return {"id": pid, "name": p["name"], "stats": self.stats()[pid], "tournaments": tours,
+                    "free": self.stats(free, [pid])[pid]}
 
     # ---------- 画面用のまとめ ----------
     def snapshot(self) -> dict:
@@ -884,6 +957,7 @@ class LeagueStore:
                 d = {k: v for k, v in t.items() if k != "owner"}  # オーナーの合言葉（ハッシュ）は出さない
                 d["winners"] = self.block_winners(t)
                 d["formats"] = formats(len(t["players"]))
+                d["standings"] = self.tour_standings(t)
                 tours.append(d)
             tours.sort(key=lambda t: -t["created"])
             return {"players": players, "games": games, "tournaments": tours, "start_points": START_POINTS,

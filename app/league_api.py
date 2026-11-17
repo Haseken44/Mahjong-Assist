@@ -83,6 +83,11 @@ async def update_player(pid: str, req: PlayerIn) -> dict:
     return await _run(store.update_player, pid, req.name, req.emoji, _photo(req.photo), req.remove_photo)
 
 
+@router.get("/api/league/players/{pid}/history")
+async def player_history(pid: str) -> dict:
+    return await _run(store.player_history, pid)
+
+
 @router.delete("/api/league/players/{pid}")
 async def delete_player(pid: str) -> dict:
     await _run(store.delete_player, pid)
