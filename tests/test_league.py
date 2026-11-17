@@ -476,3 +476,74 @@ def test_standings_order_final_before_blocks(store):
     store.finish_game(f["id"])
     res = [r["result"] for r in store.tour_standings(t)]
     assert res[:2] == ["👑 キング", "決勝2位"] and all("ブロック" in x for x in res[2:])
+
+
+def test_device_binding_until_tournament_ends(store):
+    ids = _players(store, 3)
+    t, key = store.add_tournament("紐づけ", ids, 1, owner_player=ids[0])
+    with pytest.raises(Forbidden):
+        store.invite_device(t["id"], "wrong", ids[1])
+    with pytest.raises(LeagueError):
+        store.invite_device(t["id"], key, "nobody")
+    tok = store.invite_device(t["id"], key, ids[1])
+    with pytest.raises(LeagueError):
+        store.join_device(t["id"], ids[1], "wrong")
+    dk = store.join_device(t["id"], ids[1], tok)
+    assert store.device_ok(t["id"], ids[1], dk) and not store.device_ok(t["id"], ids[2], dk)
+    with pytest.raises(LeagueError):
+        store.join_device(t["id"], ids[1], tok)  # 招待は1回だけ
+    snap = next(x for x in store.snapshot()["tournaments"] if x["id"] == t["id"])
+    assert list(snap["devices"]) == [ids[1]] and "key" not in snap["devices"][ids[1]]
+    # 別のスマホでつなぎ直すと、前のスマホは外れる
+    dk2 = store.join_device(t["id"], ids[1], store.invite_device(t["id"], key, ids[1]))
+    assert store.device_ok(t["id"], ids[1], dk2) and not store.device_ok(t["id"], ids[1], dk)
+    # オーナーが強制解除
+    store.unbind_device(t["id"], key, ids[1])
+    assert not store.device_ok(t["id"], ids[1], dk2)
+    # 大会が終わると全員の紐づけも終わる
+    dk3 = store.join_device(t["id"], ids[2], store.invite_device(t["id"], key, ids[2]))
+    tok4 = store.invite_device(t["id"], key, ids[0])
+    store.start_tournament(t["id"], key)
+    g = store.data["games"][t["final_game"]]
+    store.add_hand(g["id"], {"kind": "ron", "winner": ids[2], "loser": ids[1], "points": 8000})
+    assert store.device_ok(t["id"], ids[2], dk3)
+    store.finish_game(g["id"])
+    assert t["status"] == "done" and not store.device_ok(t["id"], ids[2], dk3)
+    with pytest.raises(LeagueError):
+        store.join_device(t["id"], ids[0], tok4)
+    with pytest.raises(LeagueError):
+        store.invite_device(t["id"], key, ids[0])
+
+
+def test_device_binding_ends_with_forced_end_and_self_leave(store):
+    ids = _players(store, 5)
+    t, key = store.add_tournament("途中", ids, 2, owner_player=ids[0])
+    dk = store.join_device(t["id"], ids[3], store.invite_device(t["id"], key, ids[3]))
+    store.leave_device(t["id"], ids[3], "wrong")
+    assert store.device_ok(t["id"], ids[3], dk)
+    store.leave_device(t["id"], ids[3], dk)
+    assert not store.device_ok(t["id"], ids[3], dk)
+    dk = store.join_device(t["id"], ids[4], store.invite_device(t["id"], key, ids[4]))
+    store.start_tournament(t["id"], key)
+    store.end_tournament(t["id"], key)  # オーナーの強制終了
+    assert not store.device_ok(t["id"], ids[4], dk) and t["devices"] == {}
+
+
+def test_device_api_and_qr(tmp_path, monkeypatch):
+    import app.league_api as api
+    monkeypatch.setattr(api, "store", LeagueStore(tmp_path))
+    client = TestClient(app)
+    ids = [client.post("/api/league/players", json={"name": f"端末{i}", "emoji": "🐸"}).json()["id"] for i in range(3)]
+    r = client.post("/api/league/tournaments", json={"players": ids, "blocks": 1, "owner_player": ids[0]}).json()
+    tid, H = r["tournament"]["id"], {"X-Owner-Key": r["owner_key"]}
+    assert client.post(f"/api/league/tournaments/{tid}/invite", json={"player": ids[1]}).status_code == 403
+    tok = client.post(f"/api/league/tournaments/{tid}/invite", json={"player": ids[1]}, headers=H).json()["token"]
+    dk = client.post(f"/api/league/tournaments/{tid}/join", json={"player": ids[1], "token": tok}).json()["device_key"]
+    assert client.post(f"/api/league/tournaments/{tid}/whoami", json={"player": ids[1], "device_key": dk}).json()["ok"]
+    t = client.get("/api/league").json()["tournaments"][0]
+    assert ids[1] in t["devices"] and "key" not in str(t["devices"])
+    r = client.post(f"/api/league/tournaments/{tid}/unbind", json={}, headers=H)
+    assert r.status_code == 200 and r.json()["devices"] == {}
+    assert not client.post(f"/api/league/tournaments/{tid}/whoami", json={"player": ids[1], "device_key": dk}).json()["ok"]
+    q = client.get("/api/league/qr", params={"text": "https://example.test/taikai#join=x"})
+    assert q.status_code == 200 and q.headers["content-type"].startswith("image/svg") and b"<svg" in q.content

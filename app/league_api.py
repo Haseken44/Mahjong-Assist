@@ -9,8 +9,8 @@ import base64
 import binascii
 from pathlib import Path
 
-from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -180,7 +180,10 @@ class TournamentIn(BaseModel):
 
 
 def _public(t: dict) -> dict:
-    return {k: v for k, v in t.items() if k != "owner"}
+    out = {k: v for k, v in t.items() if k not in ("owner", "devices", "invites")}
+    out["devices"] = {pid: {"since": x["since"]} for pid, x in (t.get("devices") or {}).items()}
+    out["invites"] = sorted((t.get("invites") or {}).keys())
+    return out
 
 
 @router.post("/api/league/tournaments")
@@ -251,3 +254,62 @@ async def reset(req: ResetIn) -> dict:
     if req.confirm.strip() != "リセット":
         raise HTTPException(status_code=400, detail="確認のため「リセット」と入力してください")
     return await _run(store.reset, req.owner_keys, req.keep_players)
+
+
+# ---------- プレイヤーとスマホの紐づけ ----------
+class PidIn(BaseModel):
+    player: str = Field(min_length=1, max_length=40)
+
+
+@router.post("/api/league/tournaments/{tid}/invite")
+async def invite_device(tid: str, req: PidIn, x_owner_key: str | None = Header(default=None)) -> dict:
+    token = await _run(store.invite_device, tid, x_owner_key, req.player)
+    return {"token": token}
+
+
+class JoinIn(BaseModel):
+    player: str = Field(min_length=1, max_length=40)
+    token: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/api/league/tournaments/{tid}/join")
+async def join_device(tid: str, req: JoinIn) -> dict:
+    # 端末の合言葉はこの1回だけ返す。スマホが保存しておき、自分の確認に使う
+    return {"device_key": await _run(store.join_device, tid, req.player, req.token)}
+
+
+class DeviceIn(BaseModel):
+    player: str = Field(min_length=1, max_length=40)
+    device_key: str = Field(default="", max_length=64)
+
+
+@router.post("/api/league/tournaments/{tid}/whoami")
+async def whoami(tid: str, req: DeviceIn) -> dict:
+    return {"ok": await run_in_threadpool(store.device_ok, tid, req.player, req.device_key)}
+
+
+@router.post("/api/league/tournaments/{tid}/leave")
+async def leave_device(tid: str, req: DeviceIn) -> dict:
+    await _run(store.leave_device, tid, req.player, req.device_key)
+    return {"ok": True}
+
+
+class UnbindIn(BaseModel):
+    player: str | None = None  # 省略で全員
+
+
+@router.post("/api/league/tournaments/{tid}/unbind")
+async def unbind_device(tid: str, req: UnbindIn, x_owner_key: str | None = Header(default=None)) -> dict:
+    return _public(await _run(store.unbind_device, tid, x_owner_key, req.player))
+
+
+@router.get("/api/league/qr")
+async def qr(text: str = Query(min_length=1, max_length=400)) -> Response:
+    """招待リンクの QR コード（SVG）。外部サービスは使わずサーバーで作る。"""
+    import io
+
+    import segno
+
+    buf = io.BytesIO()
+    segno.make(text, error="m").save(buf, kind="svg", scale=6, border=2, dark="#111", light="#fff")
+    return Response(buf.getvalue(), media_type="image/svg+xml", headers={"Cache-Control": "no-store"})

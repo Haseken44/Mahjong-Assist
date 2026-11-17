@@ -189,3 +189,21 @@ button:disabled.danger { opacity: .45; }
 .history-list .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .history-list .line { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: .82rem; color: var(--muted); }
 .history-list .result { font-weight: 700; color: var(--ink); }
+
+/* プレイヤーとスマホの紐づけ */
+.me-bar { display: grid; gap: 6px; padding: 8px 12px; background: #e8f3ec; border-bottom: 1px solid var(--line); }
+.me-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
+.me-who { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.me-who small { font-weight: 400; color: var(--muted); }
+.me-who .avatar { width: 30px; height: 30px; font-size: 1rem; }
+.me-row .acts, .devices .acts { display: flex; gap: 6px; }
+.me-tag { font-size: .68rem; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--good); color: #fff; margin-left: 4px; }
+.devices { margin-top: 12px; }
+.devices .member { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.devices .member .acts { grid-column: 1 / -1; justify-content: flex-end; }
+.devices .dev { font-size: .75rem; color: var(--muted); }
+.devices .dev.on { color: var(--good); font-weight: 700; }
+.devices .dev.wait { color: #b07a00; font-weight: 700; }
+.qr-box { display: flex; justify-content: center; padding: 8px; background: #fff; border-radius: 12px; }
+.qr-box img { width: min(240px, 70vw); height: auto; image-rendering: pixelated; }
+@media (prefers-color-scheme: dark) { .me-bar { background: #1d3327; } }

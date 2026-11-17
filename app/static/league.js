@@ -37,6 +37,9 @@ function save(key, v) {
 }
 function ownerKeys() { return load("mj-owner-keys", {}); }
 function ownerKey(tid) { return ownerKeys()[tid] || null; }
+// この端末が紐づいているプレイヤー {大会ID: {pid, key, since}}（大会ごとに1人）
+function myDevices() { return load("mj-devices", {}); }
+function myPids() { return new Set(Object.values(myDevices()).map((d) => d.pid)); }
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -85,6 +88,7 @@ function whoEl(pid, size = "") {
   const p = player(pid);
   const w = el("span", "who");
   w.append(avatarEl(p, size), el("span", "name", p.name));
+  if (myPids().has(pid)) w.append(el("span", "me-tag", "あなた"));
   if (ownerFlags().has(pid)) {
     const f = el("span", "flag", "🇯🇵");
     f.title = "大会のオーナー";
@@ -122,9 +126,11 @@ async function refresh() {
     flash(e.message);
     return;
   }
+  checkDevices();
   render();
 }
 function render() {
+  renderMe();
   renderTabs();
   renderTour();
   renderGames();
@@ -357,6 +363,7 @@ function tourCard(t) {
     row.append(b);
   }
   if (row.children.length) card.append(row);
+  if (owner && t.status !== "done") card.append(devicesBox(t));
   if (owner) {
     const tools = el("div", "row");
     tools.append(btn("ほかの端末でもオーナー操作", () => shareOwner(t)));
@@ -407,6 +414,127 @@ function standingsTable(t) {
   wrap.append(table);
   box.append(wrap, el("p", "tip", "名前をタップすると、その人の通算成績と大会ごとの履歴が見られます。"));
   return box;
+}
+
+// ---------- プレイヤーとスマホの紐づけ（オーナー） ----------
+function devicesBox(t) {
+  const box = el("div", "devices");
+  box.append(el("h3", "sub", "プレイヤーのスマホ"));
+  box.append(el("p", "tip", "「QRを出す」を本人のスマホで読み取ると、そのスマホがその人としてつながります（大会が終わるまで）。"));
+  const devs = t.devices || {};
+  const inv = new Set(t.invites || []);
+  t.players.forEach((pid) => {
+    const row = el("div", "member");
+    const st = devs[pid] ? el("span", "dev on", "📱 つながっています") : inv.has(pid) ? el("span", "dev wait", "招待中") : el("span", "dev", "未接続");
+    const acts = el("span", "acts");
+    acts.append(btn(devs[pid] ? "つなぎ直す" : "QRを出す", () => showInvite(t, pid), "small-btn" + (devs[pid] ? "" : " primary")));
+    if (devs[pid] || inv.has(pid)) {
+      acts.append(btn("解除", async () => {
+        if (!confirm(`${player(pid).name}さんのスマホの紐づけを解除しますか？`)) return;
+        await unbind(t, pid);
+      }, "small-btn danger"));
+    }
+    row.append(whoEl(pid), st, acts);
+    box.append(row);
+  });
+  if (Object.keys(devs).length || inv.size) {
+    box.append(btn("全員の紐づけを解除", async () => {
+      if (!confirm("この大会の全員のスマホの紐づけを解除しますか？（大会はそのまま続きます）")) return;
+      await unbind(t, null);
+    }, "small-btn danger"));
+  }
+  return box;
+}
+async function unbind(t, pid) {
+  try {
+    await api("POST", `/api/league/tournaments/${t.id}/unbind`, { player: pid }, { "X-Owner-Key": ownerKey(t.id) || "" });
+    flash(pid ? `${player(pid).name}さんの紐づけを解除しました` : "全員の紐づけを解除しました", false);
+    await refresh();
+  } catch (e) { flash(e.message); }
+}
+async function showInvite(t, pid) {
+  let token;
+  try {
+    ({ token } = await api("POST", `/api/league/tournaments/${t.id}/invite`, { player: pid }, { "X-Owner-Key": ownerKey(t.id) || "" }));
+  } catch (e) { flash(e.message); return; }
+  const url = `${location.origin}/taikai#join=${t.id}.${pid}.${token}`;
+  $("joinTitle").textContent = `${player(pid).name}さんのスマホをつなぐ`;
+  $("joinQr").src = `/api/league/qr?text=${encodeURIComponent(url)}`;
+  $("joinUrl").value = url;
+  $("joinDialog").showModal();
+}
+$("joinCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("joinUrl").value); flash("リンクをコピーしました。本人に送ってください", false); }
+  catch (_) { $("joinUrl").select(); flash("リンクを長押ししてコピーしてください"); }
+});
+$("joinClose").addEventListener("click", () => { $("joinDialog").close(); refresh(); });
+
+// ---------- プレイヤーとスマホの紐づけ（本人のスマホ） ----------
+async function takeJoinLink() {
+  const m = location.hash.match(/join=([0-9a-f]+)\.([0-9a-f]+)\.([A-Za-z0-9_-]+)/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname);  // 合言葉をアドレス欄に残さない
+  const [, tid, pid, token] = m;
+  try {
+    const { device_key } = await api("POST", `/api/league/tournaments/${tid}/join`, { player: pid, token });
+    const devs = myDevices();
+    devs[tid] = { pid, key: device_key, since: null };
+    save("mj-devices", devs);
+    ui.tab = "tour";
+    ui.joined = pid;
+  } catch (e) { flash(e.message); }
+}
+// サーバーの状態と合わせる：大会終了・オーナーの解除・別のスマホでつなぎ直し、のどれかなら外す
+function checkDevices() {
+  const devs = myDevices();
+  let changed = false;
+  Object.entries(devs).forEach(([tid, d]) => {
+    const t = ui.data.tournaments.find((x) => x.id === tid);
+    const cur = t && t.status !== "done" && (t.devices || {})[d.pid];
+    if (cur && d.since == null) { d.since = cur.since; changed = true; return; }
+    if (!cur || cur.since !== d.since) {
+      delete devs[tid];
+      changed = true;
+      flash(t && t.status === "done" ? `「${t.name}」が終わったので、スマホの紐づけを終えました` : "スマホの紐づけが解除されました", false);
+    }
+  });
+  if (changed) save("mj-devices", devs);
+  if (ui.joined) {
+    flash(`この端末は「${player(ui.joined).name}」さんのスマホとしてつながりました`, false);
+    ui.joined = null;
+  }
+}
+function myGame(t, pid) {
+  // 自分が打っている（打つ予定の）卓：決勝に出ていれば決勝、なければ自分のブロック
+  if (t.final_game && game(t.final_game) && game(t.final_game).players.includes(pid)) return game(t.final_game);
+  const i = t.blocks.findIndex((b) => b.includes(pid));
+  return i >= 0 && t.block_games[i] ? game(t.block_games[i]) : null;
+}
+function renderMe() {
+  const bar = $("meBar");
+  bar.replaceChildren();
+  Object.entries(myDevices()).forEach(([tid, d]) => {
+    const t = ui.data.tournaments.find((x) => x.id === tid);
+    if (!t) return;
+    const row = el("div", "me-row");
+    const who = el("div", "me-who");
+    who.append(avatarEl(player(d.pid)), el("span", null, `📱 あなたは「${player(d.pid).name}」`), el("small", null, t.name));
+    const acts = el("div", "acts");
+    const g = myGame(t, d.pid);
+    if (g) acts.append(btn("自分の卓", () => openGame(g.id), "small-btn primary"));
+    acts.append(btn("自分の成績", () => openHistory(d.pid), "small-btn"));
+    acts.append(btn("外す", async () => {
+      if (!confirm(`この端末と「${player(d.pid).name}」さんの紐づけを外しますか？`)) return;
+      try { await api("POST", `/api/league/tournaments/${tid}/leave`, { player: d.pid, device_key: d.key }); } catch (_) { /* 外れていても続ける */ }
+      const devs = myDevices();
+      delete devs[tid];
+      save("mj-devices", devs);
+      await refresh();
+    }, "small-btn"));
+    row.append(who, acts);
+    bar.append(row);
+  });
+  bar.hidden = !bar.children.length;
 }
 
 function btn(text, onClick, cls = "") {
@@ -1236,7 +1364,7 @@ $("yakumanClose").addEventListener("click", () => $("yakumanDialog").close());
 
 // ---------- 起動 ----------
 takeOwnerLink();
-refresh();
+takeJoinLink().then(refresh);
 // 他の卓の点数も随時反映（画面を見ているときだけ）
-setInterval(() => { if (!document.hidden && !$("regDialog").open && !$("yakumanDialog").open && !$("resetDialog").open && !$("historyDialog").open && !ui.edit) refresh(); }, POLL_MS);
+setInterval(() => { if (!document.hidden && !$("regDialog").open && !$("yakumanDialog").open && !$("resetDialog").open && !$("historyDialog").open && !$("joinDialog").open && !ui.edit) refresh(); }, POLL_MS);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });

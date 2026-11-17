@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f5132">
   <title>麻雀アシスト</title>
-  <link rel="stylesheet" href="/static/style.css?v=14">
+  <link rel="stylesheet" href="/static/style.css?v=15">
 </head>
 <body>
   <header class="topbar">
@@ -14,6 +14,8 @@
     <button id="glassBtn" class="glass-btn" title="スマートグラス用の表示に切り替え">グラス表示</button>
     <span id="mode" class="badge">接続中…</span>
   </header>
+  <!-- はせけん麻雀大会で、このスマホがプレイヤーとつながっているときだけ出す（手牌や分析は大会側に送らない） -->
+  <a id="taikaiMe" class="taikai-me" href="/taikai" hidden></a>
 
   <!-- スマートグラス用の表示。スマホの画面をそのままグラスに映すので、黒い背景（グラスでは透明に見える）に
        手牌と「何を切るか・狙える役」だけを大きく出す。カメラはスマホ側で動き続ける -->
@@ -203,6 +205,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">鳴き（ポン・チー・カン）とドラ表示牌は画面のボタンで入力します。カメラで自動的に読み取るのは手牌だけです（鳴き・ドラ表示牌の自動認識は今後対応予定）。<br>v0.4</footer>
-  <script src="/static/app.js?v=13"></script>
+  <script src="/static/app.js?v=14"></script>
 </body>
 </html>

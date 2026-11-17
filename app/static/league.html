@@ -5,14 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
-  <link rel="stylesheet" href="/static/style.css?v=13">
-  <link rel="stylesheet" href="/static/league.css?v=10">
+  <link rel="stylesheet" href="/static/style.css?v=15">
+  <link rel="stylesheet" href="/static/league.css?v=11">
 </head>
 <body>
   <header class="topbar">
     <h1>はせけん麻雀大会</h1>
     <a class="top-link" href="/">アシストへ</a>
   </header>
+
+  <div id="meBar" class="me-bar" hidden></div>
 
   <nav class="tabs" role="tablist">
     <button data-tab="tour" role="tab">大会</button>
@@ -215,6 +217,17 @@
     <ul id="yakumanList" class="yakuman-list"></ul>
   </dialog>
 
+  <dialog id="joinDialog" class="sheet">
+    <div class="section-head">
+      <h2 id="joinTitle">スマホをつなぐ</h2>
+      <button type="button" id="joinClose" class="small-btn">閉じる</button>
+    </div>
+    <p class="tip">本人のスマホのカメラでこのQRコードを読み取ってください。開いたスマホが、その人のスマホとしてつながります（大会が終わるか、オーナーが解除するまで）。QRは1回だけ使えます。</p>
+    <div class="qr-box"><img id="joinQr" alt="招待用のQRコード" width="240" height="240"></div>
+    <label class="field">読み取れないときはリンクを送る <input id="joinUrl" type="text" readonly></label>
+    <div class="row"><button type="button" id="joinCopy" class="primary">リンクをコピー</button></div>
+  </dialog>
+
   <dialog id="historyDialog" class="sheet">
     <div class="section-head">
       <div id="historyHead" class="history-head"></div>
@@ -246,6 +259,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=9"></script>
+  <script src="/static/league.js?v=10"></script>
 </body>
 </html>
