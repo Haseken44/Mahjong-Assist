@@ -164,3 +164,10 @@ button.danger { color: var(--accent); border-color: var(--accent); }
 .reset-kind label { align-items: flex-start; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }
 .reset-kind small { color: var(--muted); }
 button:disabled.danger { opacity: .45; }
+
+/* 複数の大会 */
+.tour-top { align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.tour-top .lbl { font-weight: 600; color: var(--muted); }
+.past-tours .game-item { width: 100%; margin-top: 8px; }
+.past-tours .game-item.on { border-color: var(--accent); }
+.tour-top > button { flex: 0 0 auto; }

@@ -177,7 +177,7 @@ def test_league_api_flow():
     me = next(p for p in state["players"] if p["id"] == ids[0])
     assert client.get(me["avatar"]).status_code == 200
 
-    r = client.post("/api/league/tournaments", json={"players": ids, "blocks": 4})
+    r = client.post("/api/league/tournaments", json={"players": ids, "blocks": 4, "owner_player": ids[0]})
     assert r.status_code == 200
     tid, key = r.json()["tournament"]["id"], r.json()["owner_key"]
     assert "owner" not in r.json()["tournament"]
@@ -366,27 +366,61 @@ def test_end_tournament_keeps_scores(store):
     store.add_tournament("次", ids[:4], 1)
 
 
-def test_reset_needs_latest_owner_and_backs_up(store, tmp_path):
-    ids = _players(store, 3)
-    t, key = store.add_tournament("A", ids, 1)
+def test_reset_needs_owner_of_every_active_tournament(store, tmp_path):
+    ids = _players(store, 6)
+    t1, k1 = store.add_tournament("A", ids[:3], 1, owner_player=ids[0])
+    t2, k2 = store.add_tournament("A", ids[3:], 1, owner_player=ids[3])
+    assert t2["name"] == "A（2）"  # 同じ名前は（2）を付けて見分ける
+    with pytest.raises(Forbidden) as e:
+        store.reset({t1["id"]: k1})  # もう1つの大会のオーナー権限がない
+    assert "A（2）" in str(e.value)
     with pytest.raises(Forbidden):
-        store.reset("wrong")
-    r = store.reset(key, keep_players=True)
-    assert (tmp_path / r["backup"]).exists() and r["players"] == 3
-    assert not store.data["games"] and not store.data["tournaments"] and len(store.data["players"]) == 3
+        store.reset({t1["id"]: k1, t2["id"]: "wrong"})
+    r = store.reset({t1["id"]: k1, t2["id"]: k2}, keep_players=True)
+    assert (tmp_path / r["backup"]).exists() and r["players"] == 6
+    assert not store.data["games"] and not store.data["tournaments"] and len(store.data["players"]) == 6
     store.reset(None)  # 大会がなければ誰でも
     assert not store.data["players"]
     assert LeagueStore(tmp_path).data["players"] == {}
 
 
-def test_reset_api_needs_confirm_word():
+def test_reset_after_all_done_needs_any_owner(store):
+    ids = _players(store, 4)
+    t1, k1 = store.add_tournament("A", ids[:2], 1)
+    t2, k2 = store.add_tournament("B", ids[2:], 1)
+    for t, k in ((t1, k1), (t2, k2)):
+        store.start_tournament(t["id"], k)
+        store.end_tournament(t["id"], k)
+    assert store.reset_blockers({}) and not store.reset_blockers({t2["id"]: k2})
+    store.reset({t2["id"]: k2})
+
+
+def test_multiple_tournaments_run_at_once(store):
+    ids = _players(store, 8)
+    t1, k1 = store.add_tournament("春", ids[:4], 1, owner_player=ids[0])
+    t2, k2 = store.add_tournament("春", ids[4:], 1, owner_player=ids[5])
+    store.start_tournament(t1["id"], k1)
+    store.start_tournament(t2["id"], k2)
+    with pytest.raises(Forbidden):
+        store.start_final(t2["id"], k1)  # ほかの大会のオーナーは操作できない
+    with pytest.raises(LeagueError):
+        store.edit_tournament(t1["id"], k1, owner_player="")  # オーナーは外せない
+    store.edit_tournament(t1["id"], k1, name="春（2）", owner_player=ids[1])
+    assert t1["name"] == "春（2）（2）" and t1["owner_player"] == ids[1]  # 名前はかぶらない
+    assert [t["status"] for t in store.snapshot()["tournaments"]] == ["final", "final"]  # 4人以下は決勝の卓だけ
+
+
+def test_reset_api_needs_confirm_word(tmp_path, monkeypatch):
+    import app.league_api as api
+    monkeypatch.setattr(api, "store", LeagueStore(tmp_path))
     client = TestClient(app)
     ids = [client.post("/api/league/players", json={"name": f"消す{i}", "emoji": "🐸"}).json()["id"] for i in range(3)]
-    r = client.post("/api/league/tournaments", json={"players": ids, "blocks": 1}).json()
-    key = r["owner_key"]
-    assert client.post("/api/league/reset", json={"confirm": "はい"}, headers={"X-Owner-Key": key}).status_code == 400
+    assert client.post("/api/league/tournaments", json={"players": ids, "blocks": 1}).status_code == 422  # オーナー必須
+    r = client.post("/api/league/tournaments", json={"players": ids, "blocks": 1, "owner_player": ids[0]}).json()
+    keys = {r["tournament"]["id"]: r["owner_key"]}
+    assert client.post("/api/league/reset", json={"confirm": "はい", "owner_keys": keys}).status_code == 400
     assert client.post("/api/league/reset", json={"confirm": "リセット"}).status_code == 403
-    r = client.post("/api/league/reset", json={"confirm": "リセット"}, headers={"X-Owner-Key": key})
+    r = client.post("/api/league/reset", json={"confirm": "リセット", "owner_keys": keys})
     assert r.status_code == 200
     s = client.get("/api/league").json()
-    assert s["players"] == [] and s["tournaments"] == [] and s["latest_tournament"] is None
+    assert s["players"] == [] and s["tournaments"] == []

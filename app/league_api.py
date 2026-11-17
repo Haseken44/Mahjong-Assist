@@ -171,7 +171,7 @@ class TournamentIn(BaseModel):
     players: list[str] = Field(max_length=32)
     blocks: int
     start_points: dict[str, int] | None = None  # {"4": 25000, "3": 35000}
-    owner_player: str | None = None
+    owner_player: str = Field(min_length=1, max_length=40)  # 大会ごとに必ずオーナーを決める
 
 
 def _public(t: dict) -> dict:
@@ -205,7 +205,7 @@ class TournamentEdit(BaseModel):
     name: str | None = Field(default=None, max_length=60)
     blocks: list[list[str]] | None = Field(default=None, max_length=4)
     start_points: dict[str, int] | None = None
-    owner_player: str | None = None  # 空文字でオーナーの旗を外す
+    owner_player: str | None = None  # オーナーを別の人に変える（外すことはできない）
 
 
 @router.patch("/api/league/tournaments/{tid}")
@@ -238,10 +238,11 @@ async def end_tournament(tid: str, x_owner_key: str | None = Header(default=None
 class ResetIn(BaseModel):
     confirm: str  # 誤操作よけ：「リセット」と入力してもらう
     keep_players: bool = False
+    owner_keys: dict[str, str] = Field(default_factory=dict, max_length=200)  # {大会ID: 合言葉}（この端末が持っている分）
 
 
 @router.post("/api/league/reset")
-async def reset(req: ResetIn, x_owner_key: str | None = Header(default=None)) -> dict:
+async def reset(req: ResetIn) -> dict:
     if req.confirm.strip() != "リセット":
         raise HTTPException(status_code=400, detail="確認のため「リセット」と入力してください")
-    return await _run(store.reset, x_owner_key, req.keep_players)
+    return await _run(store.reset, req.owner_keys, req.keep_players)

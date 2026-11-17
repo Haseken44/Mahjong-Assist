@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
   <link rel="stylesheet" href="/static/style.css?v=13">
-  <link rel="stylesheet" href="/static/league.css?v=8">
+  <link rel="stylesheet" href="/static/league.css?v=9">
 </head>
 <body>
   <header class="topbar">
@@ -27,13 +27,17 @@
       <div id="tourView"></div>
 
       <div id="tourSetup" class="card" hidden>
-        <h2>大会を作る <small>オーナー1人がこのスマホで設定します</small></h2>
+        <div class="section-head">
+          <h2>大会を作る <small>大会はいくつでも同時に開けます</small></h2>
+          <button type="button" id="tourSetupCancel" class="small-btn" hidden>やめる</button>
+        </div>
         <label class="field">大会名
           <input id="tourName" type="text" maxlength="30" value="はせけん麻雀大会">
         </label>
-        <label class="field">オーナー（設定する人。名前の横に🇯🇵の旗が付きます）
+        <label class="field">オーナー（この大会を仕切る人。名前の横に🇯🇵の旗が付きます）
           <select id="tourOwner"></select>
         </label>
+        <p id="tourOwnerNote" class="tip">大会ごとにオーナーを1人決めてください。大会を作ったこのスマホがオーナー用の端末になります（オーナー本人のスマホへは、あとで「ほかの端末でもオーナー操作」のリンクで渡せます）。</p>
         <h3 class="sub">持ち点 <small>大会を始めるまでは自由に変えられます</small></h3>
         <div class="start-points">
           <label class="field">四麻（4人卓） <input id="tourStart4" type="number" min="1000" max="200000" step="1000" value="25000" inputmode="numeric"></label>
@@ -168,7 +172,7 @@
       </div>
       <div class="card reset-card">
         <h2>最初からやり直す <small>リセット</small></h2>
-        <p class="tip">大会・対局・個人成績を消して、最初の画面に戻します。プレイヤー登録も消すか選べます。消す前の中身はサーバーに控えを残します。</p>
+        <p class="tip">すべての大会・対局・個人成績を消して、最初の画面に戻します。プレイヤー登録も消すか選べます。進行中の大会があるときは、そのすべての大会のオーナー権限がいります。消す前の中身はサーバーに控えを残します。</p>
         <p id="resetNote" class="tip" hidden></p>
         <button type="button" id="resetOpen" class="danger">リセットする…</button>
       </div>
@@ -228,6 +232,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=7"></script>
+  <script src="/static/league.js?v=8"></script>
 </body>
 </html>
