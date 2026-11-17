@@ -146,3 +146,14 @@ button.danger { color: var(--accent); border-color: var(--accent); }
 @media (prefers-color-scheme: dark) { .edit-bar.nima { background: #15233a; color: #9cc0ff; } }
 .quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .quick button { min-height: 36px; padding: 4px 10px; font-size: .85rem; }
+
+/* 役満一覧 */
+#yakumanDialog { max-height: 86vh; }
+.yakuman-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.yakuman-list li { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: grid; gap: 4px; font-size: .85rem; }
+.yakuman-list .yn { font-weight: 700; font-size: .95rem; }
+.yakuman-list .yn small { font-weight: normal; color: var(--muted); margin-left: 6px; }
+.yakuman-list .cond { font-size: .75rem; color: var(--warn); }
+.yakuman-list .ex { display: flex; flex-wrap: wrap; gap: 2px; }
+.yakuman-list .ex img { width: 22px; height: 30px; border-radius: 3px; border: 1px solid var(--line); background: #fbf8ef; }
+.section-head .small-btn + .small-btn { margin-left: 6px; }

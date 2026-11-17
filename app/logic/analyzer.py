@@ -8,6 +8,7 @@ from mahjong.shanten import Shanten
 from . import tiles as T
 from .scorer import score_both, score_hand
 from .settings import RoundSettings
+from .yakuman import is_yakuman_score, yakuman_hints
 
 _shanten = Shanten()
 
@@ -83,6 +84,7 @@ def _wait_scores(hand13: list[str], waits: list[dict], settings: RoundSettings) 
             "fu": r.fu,
             "level": r.level,
             "yaku": [y["name"] for y in r.yaku],
+            "yakuman": bool(r.ok and (any(y["yakuman"] for y in r.yaku) or r.han >= 13)),
             "ron": {"ok": ron.ok, "total": ron.total, "payment": ron.payment, "han": ron.han, "fu": ron.fu,
                     "level": ron.level, "error": ron.error},
             "tsumo": {"ok": tsu.ok, "total": tsu.total, "payment": tsu.payment, "han": tsu.han, "fu": tsu.fu,
@@ -211,13 +213,28 @@ def yaku_hints(hand: list[str], settings: RoundSettings) -> list[dict]:
         a = best[1] + 1
         add("三色同順（サンショク）", best[0], f"萬子・筒子・索子で{a}{a + 1}{a + 2}を揃える。あと{best[0]}枚", h("2翻", "1翻（鳴き）"))
 
-    # 国士無双
-    kinds = sum(1 for i in range(34) if T.is_terminal_or_honor(i) and arr[i] > 0)
-    if kinds >= 9 and no_meld:
-        add("国士無双", 13 - kinds, f"1・9・字牌13種のうち{kinds}種あり。役満！", "役満")
+    # 役満：近いもの（あと4枚以内）だけ「役満が狙えます！」として出す
+    for y in yakuman_hints(hand, settings, max_distance=4):
+        hints.append({**y, "name": y["name"], "note": "役満が狙えます！ " + y["note"]})
 
     hints.sort(key=lambda h: (h["distance"], h["name"] != "立直"))
     return hints
+
+
+def nima_discard(hand: list[str], settings: RoundSettings) -> dict | None:
+    """二麻向け：14枚から1枚切ったとき、いちばん近い役満に近づく打牌（同じなら向聴数が小さい方）。"""
+    best = None
+    closed = not settings.melds
+    for t in T.sort_tiles(set(hand)):
+        rest = list(hand)
+        rest.remove(t)
+        hs = yakuman_hints(rest, settings)
+        if not hs:
+            continue
+        key = (hs[0]["distance"], shanten_of(T.to_34_array(rest), closed))
+        if best is None or key < best[0]:
+            best = (key, {"discard": t, "yakuman": hs[0]["name"], "distance": hs[0]["distance"]})
+    return best[1] if best else None
 
 
 def analyze(hand: list[str], settings: RoundSettings) -> dict:
@@ -247,7 +264,13 @@ def analyze(hand: list[str], settings: RoundSettings) -> dict:
         result["message"] = f"牌が{n}枚あります。{extra}{full}枚以下にしてください"
         return result
 
-    result["hints"] = yaku_hints(hand, settings)
+    if settings.is_nima:
+        # 二麻はアガリが役満だけ。ふつうの役は出さず、近い役満を順に教える
+        result["nima"] = True
+        result["hints"] = [{**y, "note": ("この役満が狙えますよ！ " if i == 0 else "") + y["note"]}
+                           for i, y in enumerate(yakuman_hints(hand, settings)[:4])]
+    else:
+        result["hints"] = yaku_hints(hand, settings)
 
     if n == full - 1:
         sh, eff = effective_tiles(T.to_34_array(hand), _visible(settings), settings.players, closed)
@@ -256,6 +279,11 @@ def analyze(hand: list[str], settings: RoundSettings) -> dict:
         if sh == 0:
             result["waits"] = _wait_scores(hand, eff, settings)
             result["message"] = "テンパイ！待ち牌とアガったときの点数です"
+            if settings.is_nima:
+                for w in result["waits"]:
+                    w["nima_ok"] = w["yakuman"]
+                if not any(w["nima_ok"] for w in result["waits"]):
+                    result["message"] = "テンパイですが役満ではないので、二麻ではアガれません。役満の形を目指しましょう"
         else:
             result["message"] = f"{shanten_label(sh)}。有効牌を引いたら手が進みます"
     elif n == full:
@@ -266,9 +294,24 @@ def analyze(hand: list[str], settings: RoundSettings) -> dict:
             result["score"] = both[both["selected"]]
             result["scores"] = both
             result["message"] = "アガリ形です！"
+            if settings.is_nima:
+                ok = is_yakuman_score(result["score"])
+                result["nima_ok"] = ok
+                if not ok:
+                    result["message"] = "アガリの形ですが、二麻は役満でないとアガれません。役満を目指して打ち続けましょう"
         options = discard_options(hand, settings)
         result["discards"] = options
-        if sh != -1 and options:
+        if settings.is_nima:
+            for o in options:
+                for w in o.get("waits") or []:
+                    w["nima_ok"] = w["yakuman"]
+        if sh != -1 and options and settings.is_nima:
+            nd = nima_discard(hand, settings)
+            if nd:
+                result["nima_discard"] = nd
+                result["message"] = (f"役満狙いなら「{T.display_name(nd['discard'])}」切り"
+                                     f"（{nd['yakuman']}まであと{nd['distance']}枚の目安）")
+        elif sh != -1 and options:
             best = options[0]
             if settings.is_sanma and "4z" in hand:
                 # 三麻の北は切るより抜く方が得（ドラ1＋もう1枚引ける）

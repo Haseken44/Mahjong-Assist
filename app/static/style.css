@@ -221,3 +221,18 @@ body.glasses #cameraHint { display: none; }
 
 .taikai-link { text-decoration: none; color: inherit; display: inline-flex; align-items: center; }
 .taikai-link + .glass-btn { margin-left: 0; }
+
+/* 二人麻雀・役満一覧 */
+.players-switch { flex-wrap: wrap; row-gap: 6px; }
+.small-inline { min-height: 32px; padding: 2px 10px; font-size: .8rem; }
+.nima-note b { color: var(--accent); }
+.yakuman-dialog { border: 0; border-radius: 16px; padding: 14px; width: min(94vw, 520px); max-height: 86vh; background: var(--card); color: var(--ink); }
+.yakuman-dialog::backdrop { background: rgba(0,0,0,.5); }
+.yakuman-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.yakuman-list li { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: grid; gap: 4px; }
+.yakuman-list .yn { font-weight: 700; }
+.yakuman-list .yn small { font-weight: normal; color: var(--muted); margin-left: 6px; }
+.yakuman-list .cond { font-size: .75rem; color: var(--warn); }
+.yakuman-list .tiles.small .tile { width: 22px; height: 30px; }
+.hint.yakuman .dist { background: var(--accent); color: #fff; }
+.no-nima { opacity: .55; }

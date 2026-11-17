@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f5132">
   <title>麻雀アシスト</title>
-  <link rel="stylesheet" href="/static/style.css?v=13">
+  <link rel="stylesheet" href="/static/style.css?v=14">
 </head>
 <body>
   <header class="topbar">
@@ -127,7 +127,9 @@
       <div class="players-switch" role="radiogroup" aria-label="人数">
         <label><input type="radio" name="players" value="4" checked> 四人麻雀</label>
         <label><input type="radio" name="players" value="3"> 三人麻雀（さんま）</label>
+        <label><input type="radio" name="players" value="2"> 二人麻雀（にま）</label>
       </div>
+      <p class="tip nima-only nima-note" hidden>二人麻雀：牌もルールも四人麻雀と同じですが、<b>アガれるのは役満だけ</b>です。配牌から近い役満を「狙える役満」に出します。 <button type="button" class="yakuman-btn small-inline">役満一覧を見る</button></p>
       <div class="settings">
         <label>自風
           <select id="seatWind">
@@ -177,7 +179,10 @@
     </section>
 
     <section id="result" class="card result" aria-live="polite">
-      <h2>アシスト</h2>
+      <div class="section-head">
+        <h2>アシスト</h2>
+        <button type="button" class="yakuman-btn small-inline">役満一覧</button>
+      </div>
       <p id="message" class="message">手牌を映すか入力すると、ここに「何を切るか」「狙える役」「点数」が出ます。</p>
       <div id="score"></div>
       <div id="waits"></div>
@@ -186,8 +191,18 @@
     </section>
   </main>
 
+  <!-- 役満一覧（二麻はアガリが役満だけなので、いつでも開けるようにする） -->
+  <dialog id="yakumanDialog" class="yakuman-dialog">
+    <div class="section-head">
+      <h2>役満一覧 <small>やくまん＝いちばん高い役</small></h2>
+      <button type="button" id="yakumanClose" class="small-inline">閉じる</button>
+    </div>
+    <p class="tip">子は32,000点、親は48,000点。二人麻雀（にま）ではアガれるのは役満だけです。</p>
+    <ul id="yakumanList" class="yakuman-list"></ul>
+  </dialog>
+
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">鳴き（ポン・チー・カン）とドラ表示牌は画面のボタンで入力します。カメラで自動的に読み取るのは手牌だけです（鳴き・ドラ表示牌の自動認識は今後対応予定）。<br>v0.4</footer>
-  <script src="/static/app.js?v=12"></script>
+  <script src="/static/app.js?v=13"></script>
 </body>
 </html>
