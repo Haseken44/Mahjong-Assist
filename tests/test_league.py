@@ -341,3 +341,52 @@ def test_league_api_nima_free_game():
     r = client.post("/api/league/games", json={"players": ids})
     assert r.status_code == 200 and len(r.json()["players"]) == 2
     assert client.post("/api/league/games", json={"players": ids[:1]}).status_code == 422
+
+
+def test_end_tournament_keeps_scores(store):
+    ids = _players(store, 5)
+    t, key = store.add_tournament("途中終了", ids, 2)
+    with pytest.raises(LeagueError):
+        store.end_tournament(t["id"], key)  # 開始前は「やめる」で削除
+    store.start_tournament(t["id"], key)
+    g0 = store.data["games"][t["block_games"][0]]
+    w, l = g0["players"][1], g0["players"][0]
+    store.add_hand(g0["id"], {"kind": "ron", "winner": w, "loser": l, "points": 32000 if len(g0["players"]) == 2 else 8000})
+    with pytest.raises(Forbidden):
+        store.end_tournament(t["id"], "wrong")
+    store.end_tournament(t["id"], key)
+    assert t["status"] == "done" and t["ended_early"] and t["king"] is None
+    assert all(store.data["games"][gid]["finished"] for gid in t["block_games"])
+    st = store.stats()
+    assert st[w]["plus"] > 0 and st[w]["finished"] == 0  # 点数は残る・打ち切りの卓は順位なし
+    assert store.snapshot()["tournaments"][0]["winners"] == [None, None]
+    with pytest.raises(LeagueError):
+        store.reopen_game(g0["id"])
+    # 終わった後は新しい大会を作れる
+    store.add_tournament("次", ids[:4], 1)
+
+
+def test_reset_needs_latest_owner_and_backs_up(store, tmp_path):
+    ids = _players(store, 3)
+    t, key = store.add_tournament("A", ids, 1)
+    with pytest.raises(Forbidden):
+        store.reset("wrong")
+    r = store.reset(key, keep_players=True)
+    assert (tmp_path / r["backup"]).exists() and r["players"] == 3
+    assert not store.data["games"] and not store.data["tournaments"] and len(store.data["players"]) == 3
+    store.reset(None)  # 大会がなければ誰でも
+    assert not store.data["players"]
+    assert LeagueStore(tmp_path).data["players"] == {}
+
+
+def test_reset_api_needs_confirm_word():
+    client = TestClient(app)
+    ids = [client.post("/api/league/players", json={"name": f"消す{i}", "emoji": "🐸"}).json()["id"] for i in range(3)]
+    r = client.post("/api/league/tournaments", json={"players": ids, "blocks": 1}).json()
+    key = r["owner_key"]
+    assert client.post("/api/league/reset", json={"confirm": "はい"}, headers={"X-Owner-Key": key}).status_code == 400
+    assert client.post("/api/league/reset", json={"confirm": "リセット"}).status_code == 403
+    r = client.post("/api/league/reset", json={"confirm": "リセット"}, headers={"X-Owner-Key": key})
+    assert r.status_code == 200
+    s = client.get("/api/league").json()
+    assert s["players"] == [] and s["tournaments"] == [] and s["latest_tournament"] is None

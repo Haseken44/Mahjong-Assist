@@ -228,3 +228,20 @@ async def change_entries(tid: str, req: EntriesIn, x_owner_key: str | None = Hea
 async def delete_tournament(tid: str, x_owner_key: str | None = Header(default=None)) -> dict:
     await _run(store.delete_tournament, tid, x_owner_key)
     return {"ok": True}
+
+
+@router.post("/api/league/tournaments/{tid}/end")
+async def end_tournament(tid: str, x_owner_key: str | None = Header(default=None)) -> dict:
+    return _public(await _run(store.end_tournament, tid, x_owner_key))
+
+
+class ResetIn(BaseModel):
+    confirm: str  # 誤操作よけ：「リセット」と入力してもらう
+    keep_players: bool = False
+
+
+@router.post("/api/league/reset")
+async def reset(req: ResetIn, x_owner_key: str | None = Header(default=None)) -> dict:
+    if req.confirm.strip() != "リセット":
+        raise HTTPException(status_code=400, detail="確認のため「リセット」と入力してください")
+    return await _run(store.reset, x_owner_key, req.keep_players)

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
   <link rel="stylesheet" href="/static/style.css?v=13">
-  <link rel="stylesheet" href="/static/league.css?v=7">
+  <link rel="stylesheet" href="/static/league.css?v=8">
 </head>
 <body>
   <header class="topbar">
@@ -164,6 +164,13 @@
           <button class="small-btn primary" data-open-register>＋登録</button>
         </div>
         <div id="playerList" class="player-list"></div>
+        <p class="tip">名前・アバターを直すときは、プレイヤーをタップしてください。</p>
+      </div>
+      <div class="card reset-card">
+        <h2>最初からやり直す <small>リセット</small></h2>
+        <p class="tip">大会・対局・個人成績を消して、最初の画面に戻します。プレイヤー登録も消すか選べます。消す前の中身はサーバーに控えを残します。</p>
+        <p id="resetNote" class="tip" hidden></p>
+        <button type="button" id="resetOpen" class="danger">リセットする…</button>
       </div>
     </section>
   </main>
@@ -203,8 +210,24 @@
     <ul id="yakumanList" class="yakuman-list"></ul>
   </dialog>
 
+  <dialog id="resetDialog" class="sheet">
+    <form method="dialog" id="resetForm">
+      <h2>リセットしますか？</h2>
+      <div class="checks reset-kind">
+        <label><input type="radio" name="resetKind" value="all" checked> <span><b>プレイヤー登録もすべて消す</b><br><small>名前・アバター・大会・対局・成績をすべて消して最初に戻る</small></span></label>
+        <label><input type="radio" name="resetKind" value="keep"> <span><b>プレイヤーは残す</b><br><small>大会・対局・成績だけ消す（名前・アバターはそのまま）</small></span></label>
+      </div>
+      <label class="field">確認のため「リセット」と入力 <input id="resetWord" type="text" autocomplete="off" placeholder="リセット"></label>
+      <p id="resetError" class="note" hidden></p>
+      <div class="row">
+        <button type="button" id="resetCancel">やめる</button>
+        <button type="submit" id="resetDo" class="danger" disabled>リセットする</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=6"></script>
+  <script src="/static/league.js?v=7"></script>
 </body>
 </html>

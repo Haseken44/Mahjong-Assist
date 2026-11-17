@@ -157,3 +157,10 @@ button.danger { color: var(--accent); border-color: var(--accent); }
 .yakuman-list .ex { display: flex; flex-wrap: wrap; gap: 2px; }
 .yakuman-list .ex img { width: 22px; height: 30px; border-radius: 3px; border: 1px solid var(--line); background: #fbf8ef; }
 .section-head .small-btn + .small-btn { margin-left: 6px; }
+
+/* リセット（最初からやり直す） */
+.reset-card { border: 1px dashed var(--accent); }
+.checks.reset-kind { display: grid; gap: 8px; margin: 8px 0 12px; }
+.reset-kind label { align-items: flex-start; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }
+.reset-kind small { color: var(--muted); }
+button:disabled.danger { opacity: .45; }
