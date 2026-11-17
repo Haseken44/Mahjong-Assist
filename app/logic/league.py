@@ -25,6 +25,7 @@ SEATS = ["東", "南", "西", "北"]
 START_POINTS = {4: 25000, 3: 35000}  # 配給原点（雀魂と同じ）
 MAX_NAME = 16
 MAX_POINTS = 1_000_000
+MIN_START, MAX_START = 1000, 200_000  # 持ち点として選べる範囲（100点単位）
 
 
 class LeagueError(ValueError):
@@ -38,6 +39,17 @@ class Forbidden(LeagueError):
 def default_dir() -> Path:
     base = Path(os.environ.get("MAHJONG_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
     return base / "league"
+
+
+def check_start(v) -> int:
+    """開始前に決める持ち点（100点単位）。"""
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        raise LeagueError("持ち点を数字で入力してください") from None
+    if not MIN_START <= v <= MAX_START or v % 100:
+        raise LeagueError(f"持ち点は{MIN_START:,}〜{MAX_START:,}点の100点単位で入力してください")
+    return v
 
 
 def _new_id() -> str:
@@ -201,7 +213,7 @@ class LeagueStore:
         return g
 
     def _make_game(self, player_ids: list[str], title: str, tournament: str | None = None,
-                   stage: str | None = None, block: int | None = None) -> dict:
+                   stage: str | None = None, block: int | None = None, start: int | None = None) -> dict:
         if len(player_ids) not in (3, 4):
             raise LeagueError("対局は3人（三麻）か4人（四麻）です")
         if len(set(player_ids)) != len(player_ids):
@@ -209,13 +221,14 @@ class LeagueStore:
         for pid in player_ids:
             self._player(pid)
         n = len(player_ids)
+        start = check_start(start) if start is not None else START_POINTS[n]
         gid = _new_id()
         g = {
             "id": gid,
             "title": (title or "").strip()[:30] or ("四麻" if n == 4 else "三麻"),
             "players": list(player_ids),  # 並び＝起家から順の席（東・南・西・北）
-            "start": START_POINTS[n],
-            "points": {pid: START_POINTS[n] for pid in player_ids},
+            "start": start,
+            "points": {pid: start for pid in player_ids},
             "dealer": 0,
             "hands": [],
             "finished": False,
@@ -228,13 +241,27 @@ class LeagueStore:
         self.data["games"][gid] = g
         return g
 
-    def add_game(self, player_ids: list[str], title: str = "", shuffle: bool = True) -> dict:
+    def add_game(self, player_ids: list[str], title: str = "", shuffle: bool = True, start: int | None = None) -> dict:
         """大会以外の対局。席順（東南西北）はこちらで抽選する（shuffle=False はテスト用）。"""
         with self.lock:
             order = list(player_ids)
             if shuffle:
                 random.SystemRandom().shuffle(order)
-            g = self._make_game(order, title)
+            g = self._make_game(order, title, start=start)
+            self._save()
+            return g
+
+    def set_game_start(self, gid: str, start: int, key: str | None = None) -> dict:
+        """まだ1局も記録していない対局の持ち点を変える（大会の卓はオーナーだけ）。"""
+        with self.lock:
+            g = self._game(gid)
+            if g["tournament"]:
+                self._owner(self._tour(g["tournament"]), key)
+            if g["hands"] or g["finished"]:
+                raise LeagueError("点数を記録したあとは持ち点を変えられません（最後の局から取り消すと変えられます）")
+            start = check_start(start)
+            g["start"] = start
+            g["points"] = {pid: start for pid in g["players"]}
             self._save()
             return g
 
@@ -419,8 +446,20 @@ class LeagueStore:
             i += size
         return out
 
-    def add_tournament(self, name: str, player_ids: list[str], blocks: int) -> tuple[dict, str]:
+    @staticmethod
+    def tour_start(t: dict, n: int) -> int:
+        return int((t.get("start_points") or {}).get(str(n), START_POINTS[n]))
+
+    def _check_start_points(self, sp: dict | None) -> dict:
+        sp = sp or {}
+        return {str(n): check_start(sp.get(str(n), sp.get(n, START_POINTS[n]))) for n in (4, 3)}
+
+    def add_tournament(self, name: str, player_ids: list[str], blocks: int,
+                       start_points: dict | None = None, owner_player: str | None = None) -> tuple[dict, str]:
         with self.lock:
+            start_points = self._check_start_points(start_points)
+            if owner_player:
+                self._player(owner_player)
             if len(set(player_ids)) != len(player_ids):
                 raise LeagueError("同じプレイヤーが2回選ばれています")
             for pid in player_ids:
@@ -442,6 +481,8 @@ class LeagueStore:
                 "final_game": None,
                 "status": "setup",  # setup → blocks → final → done
                 "king": None,
+                "start_points": start_points,       # 開始前に決める持ち点 {"4": 25000, "3": 35000}
+                "owner_player": owner_player or None,  # オーナーのプレイヤー（🇯🇵の旗を立てる）
                 "owner": _hash(key),
                 "created": int(time.time()),
             }
@@ -473,7 +514,8 @@ class LeagueStore:
         return [list(b) for b in blocks]
 
     def edit_tournament(self, tid: str, key: str | None, name: str | None = None,
-                        blocks: list[list[str]] | None = None) -> dict:
+                        blocks: list[list[str]] | None = None, start_points: dict | None = None,
+                        owner_player: str | None = None) -> dict:
         """オーナーが大会を編集する。
 
         - 大会名：いつでも変えられる
@@ -485,6 +527,24 @@ class LeagueStore:
             self._owner(t, key)
             if name is not None:
                 t["name"] = " ".join(name.split())[:30] or t["name"]
+            if owner_player is not None:
+                if owner_player:
+                    self._player(owner_player)
+                t["owner_player"] = owner_player or None
+            if start_points is not None:
+                sp = self._check_start_points(start_points)
+                changed = sp != {str(n): self.tour_start(t, n) for n in (4, 3)}
+                if changed and t["status"] == "done":
+                    raise LeagueError("終わった大会の持ち点は変えられません")
+                t["start_points"] = sp
+                # まだ点数を記録していない卓には新しい持ち点を反映する
+                gids = list(t["block_games"]) + ([t["final_game"]] if t["final_game"] else [])
+                for gid in gids:
+                    g = self.data["games"][gid]
+                    if not g["hands"] and not g["finished"]:
+                        st = self.tour_start(t, len(g["players"]))
+                        g["start"] = st
+                        g["points"] = {pid: st for pid in g["players"]}
             if blocks is not None:
                 blocks = self._check_blocks(blocks)
                 if t["status"] == "setup":
@@ -500,8 +560,8 @@ class LeagueStore:
                         if old != new:
                             g = games[i]
                             n = len(new)
-                            g.update(players=list(new), start=START_POINTS[n],
-                                     points={pid: START_POINTS[n] for pid in new}, dealer=0)
+                            st = self.tour_start(t, n)
+                            g.update(players=list(new), start=st, points={pid: st for pid in new}, dealer=0)
                     t["blocks"] = blocks
                 else:
                     raise LeagueError("決勝が始まったので、ブロック分けは変えられません")
@@ -539,7 +599,8 @@ class LeagueStore:
             if t["status"] != "setup":
                 raise LeagueError("この大会はもう始まっています")
             for i, members in enumerate(t["blocks"]):
-                g = self._make_game(members, f"{t['name']} {chr(65 + i)}ブロック", tournament=tid, stage="block", block=i)
+                g = self._make_game(members, f"{t['name']} {chr(65 + i)}ブロック", tournament=tid, stage="block", block=i,
+                                    start=self.tour_start(t, len(members)))
                 t["block_games"].append(g["id"])
             t["status"] = "blocks"
             self._save()
@@ -564,7 +625,8 @@ class LeagueStore:
                 raise LeagueError(f"まだ終わっていないブロックがあります（{'・'.join(left)}ブロック）")
             order = list(winners)
             random.SystemRandom().shuffle(order)  # 決勝の席順も抽選
-            g = self._make_game(order, f"{t['name']} 決勝", tournament=tid, stage="final")
+            g = self._make_game(order, f"{t['name']} 決勝", tournament=tid, stage="final",
+                                start=self.tour_start(t, len(order)))
             t["final_game"] = g["id"]
             t["status"] = "final"
             self._save()

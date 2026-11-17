@@ -119,3 +119,11 @@ dialog.sheet h2 { margin-top: 0; }
 .edit-member[aria-pressed=true] { background: #d4a017; color: #1d1d1b; border-color: transparent; }
 .block.locked { opacity: .6; }
 .entries { display: grid; gap: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: 10px; }
+
+/* 持ち点・オーナーの旗 */
+.start-points { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.start-edit { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-top: 8px; }
+.flag { margin-left: 4px; font-size: 1rem; line-height: 1; }
+.owner-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px; border-radius: 10px; background: var(--bg); margin-bottom: 6px; }
+.owner-line .lbl { font-size: .8rem; color: var(--muted); }
+.owner-line .small-btn { margin-left: auto; }

@@ -80,7 +80,27 @@ function whoEl(pid, size = "") {
   const p = player(pid);
   const w = el("span", "who");
   w.append(avatarEl(p, size), el("span", "name", p.name));
+  if (ownerFlags().has(pid)) {
+    const f = el("span", "flag", "🇯🇵");
+    f.title = "大会のオーナー";
+    w.append(f);
+  }
   return w;
+}
+// 大会のオーナーのプレイヤー（名前の横に日本の旗を立てる）
+function ownerFlags() {
+  const ts = ui.data.tournaments;
+  const shown = ts.filter((t) => t.status !== "done");
+  if (ts[0] && !shown.includes(ts[0])) shown.push(ts[0]);
+  return new Set(shown.map((t) => t.owner_player).filter(Boolean));
+}
+function startInput(id) {
+  const v = $(id).value.trim();
+  return v === "" ? null : parseInt(v, 10);
+}
+function ownerOptions(select, value) {
+  options(select, [["", "（選ばない）"], ...ui.data.players.slice().sort((a, b) => a.name.localeCompare(b.name, "ja")).map((p) => [p.id, p.name])], false);
+  select.value = value || "";
 }
 function seatName(g, i) {
   const n = g.players.length;
@@ -167,6 +187,7 @@ function renderTour() {
 }
 
 function renderSetup() {
+  if (!$("tourOwner").matches(":focus")) ownerOptions($("tourOwner"), $("tourOwner").value || load("mj-owner-player", ""));
   // 消えたプレイヤーは外す
   [...ui.tourPick].forEach((pid) => { if (!ui.data.players.some((p) => p.id === pid)) ui.tourPick.delete(pid); });
   pickButtons($("tourPick"), (pid) => ui.tourPick.has(pid), null, (pid) => {
@@ -201,7 +222,10 @@ $("tourCreate").addEventListener("click", async () => {
   try {
     const r = await api("POST", "/api/league/tournaments", {
       name: $("tourName").value, players: [...ui.tourPick], blocks: ui.tourBlocks,
+      owner_player: $("tourOwner").value || null,
+      start_points: { 4: startInput("tourStart4") ?? 25000, 3: startInput("tourStart3") ?? 35000 },
     });
+    save("mj-owner-player", $("tourOwner").value);
     const keys = ownerKeys();
     keys[r.tournament.id] = r.owner_key;  // このスマホがオーナー
     save("mj-owner-keys", keys);
@@ -231,6 +255,21 @@ function tourCard(t) {
   head.append(h);
   card.append(head);
   const owner = !!ownerKey(t.id);
+  // オーナー（🇯🇵）と編集ボタン
+  const ol = el("div", "owner-line");
+  ol.append(el("span", "lbl", "オーナー"));
+  if (t.owner_player) ol.append(whoEl(t.owner_player)); else ol.append(el("span", "lbl", "（未設定）🇯🇵"));
+  if (!(ui.edit && ui.edit.tid === t.id)) {
+    const eb = btn("編集", () => {
+      if (!ownerKey(t.id)) { flash("編集はオーナーの端末でできます。オーナーに「ほかの端末でもオーナー操作」のリンクをもらってください"); return; }
+      startEdit(t);
+    }, "small-btn" + (owner ? " primary" : ""));
+    ol.append(eb);
+  }
+  card.append(ol);
+  const sp = t.start_points || { 4: 25000, 3: 35000 };
+  card.append(el("p", "tip", `持ち点：四麻 ${pts(+sp[4])}点・三麻 ${pts(+sp[3])}点`));
+
   if (owner && ui.edit && ui.edit.tid === t.id) {
     card.append(editView(t));
     return card;
@@ -285,7 +324,6 @@ function tourCard(t) {
   if (row.children.length) card.append(row);
   if (owner) {
     const tools = el("div", "row");
-    tools.append(btn("大会を編集", () => startEdit(t)));
     tools.append(btn("ほかの端末でもオーナー操作", () => shareOwner(t)));
     card.append(tools);
   }
@@ -372,7 +410,8 @@ function renderGames() {
 
 $("newGame").addEventListener("click", async () => {
   try {
-    const g = await api("POST", "/api/league/games", { players: ui.newPick });
+    const g = await api("POST", "/api/league/games", { players: ui.newPick, start: startInput("newStart") });
+    $("newStart").value = "";
     ui.newPick = [];
     await refresh();
     openGame(g.id);
@@ -446,6 +485,10 @@ function renderGameDetail(g) {
   $("gDealer").value = String(g.dealer);
   updateKind();
 
+  // 持ち点：1局目を記録するまで変えられる（大会の卓はオーナーの端末だけ）
+  const canStart = !g.hands.length && !g.finished && (!g.tournament || !!ownerKey(g.tournament));
+  $("gStartBox").hidden = !canStart;
+  if (canStart && !$("gStart").matches(":focus")) $("gStart").value = g.start;
   $("gEntry").hidden = g.finished;
   $("gDealer").disabled = g.finished;
   $("gUndo").hidden = g.finished;
@@ -507,6 +550,16 @@ function updateKind() {
   $("hChildBox").firstChild.textContent = winnerIsDealer ? "全員の支払い（〇〇点オール） " : "子の支払い（1人あたり） ";
 }
 document.querySelectorAll("input[name=hkind]").forEach((r) => r.addEventListener("change", updateKind));
+
+$("gStartSave").addEventListener("click", async () => {
+  const g = game(ui.game);
+  try {
+    await api("POST", `/api/league/games/${ui.game}/start`, { start: startInput("gStart") },
+      g && g.tournament ? { "X-Owner-Key": ownerKey(g.tournament) || "" } : {});
+    flash("持ち点を変えました", false);
+    await refresh();
+  } catch (e) { flash(e.message); }
+});
 
 $("gDealer").addEventListener("change", async () => {
   try {
@@ -697,6 +750,7 @@ $("regDelete").addEventListener("click", async () => {
 function startEdit(t) {
   ui.edit = {
     tid: t.id, name: t.name, blocks: t.blocks.map((b) => [...b]), sel: null,
+    owner: t.owner_player || "", start: { ...(t.start_points || { 4: 25000, 3: 35000 }) },
     entries: false, pick: new Set(t.players), nb: t.blocks.length,
   };
   renderTour();
@@ -718,6 +772,33 @@ function editView(t) {
   name.addEventListener("input", () => (e.name = name.value));
   nameField.append(name);
   box.append(nameField);
+
+  const ownerField = el("label", "field", "オーナー（🇯🇵の旗を立てる人）");
+  const os = document.createElement("select");
+  ownerOptions(os, e.owner);
+  os.addEventListener("change", () => (e.owner = os.value));
+  ownerField.append(os);
+  box.append(ownerField);
+
+  if (t.status !== "done") {
+    box.append(el("h3", "sub", "持ち点"));
+    if (t.status !== "setup") box.append(el("p", "tip", "開始後は、まだ点数を記録していない卓にだけ反映されます。"));
+    const spBox = el("div", "start-points");
+    [4, 3].forEach((n) => {
+      const f = el("label", "field", n === 4 ? "四麻（4人卓）" : "三麻（3人卓）");
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.step = "1000";
+      inp.min = "1000";
+      inp.max = "200000";
+      inp.inputMode = "numeric";
+      inp.value = e.start[n];
+      inp.addEventListener("input", () => (e.start[n] = parseInt(inp.value, 10) || 0));
+      f.append(inp);
+      spBox.append(f);
+    });
+    box.append(spBox);
+  }
 
   const canBlocks = t.status === "setup" || t.status === "blocks";
   if (canBlocks) {
@@ -776,8 +857,9 @@ function editView(t) {
   const row = el("div", "row");
   row.append(btn("やめる", () => { ui.edit = null; renderTour(); }));
   row.append(btn("保存する", async () => {
-    const body = { name: e.name };
+    const body = { name: e.name, owner_player: e.owner };
     if (canBlocks) body.blocks = e.blocks;
+    if (t.status !== "done") body.start_points = e.start;
     try {
       await api("PATCH", `/api/league/tournaments/${t.id}`, body, { "X-Owner-Key": ownerKey(t.id) || "" });
       ui.edit = null;
@@ -828,7 +910,7 @@ function entriesView(t) {
     try {
       const H = { "X-Owner-Key": ownerKey(t.id) || "" };
       await api("POST", `/api/league/tournaments/${t.id}/entries`, { players: [...e.pick], blocks: e.nb }, H);
-      if (e.name !== t.name) await api("PATCH", `/api/league/tournaments/${t.id}`, { name: e.name }, H);
+      await api("PATCH", `/api/league/tournaments/${t.id}`, { name: e.name, owner_player: e.owner, start_points: e.start }, H);
       ui.edit = null;
       flash("参加者を変えて抽選し直しました", false);
       await refresh();

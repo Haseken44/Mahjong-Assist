@@ -92,11 +92,21 @@ async def delete_player(pid: str) -> dict:
 class GameIn(BaseModel):
     players: list[str] = Field(min_length=3, max_length=4)
     title: str = Field(default="", max_length=60)
+    start: int | None = None  # 持ち点（省略で四麻25000・三麻35000）
 
 
 @router.post("/api/league/games")
 async def add_game(req: GameIn) -> dict:
-    return await _run(store.add_game, req.players, req.title)
+    return await _run(store.add_game, req.players, req.title, True, req.start)
+
+
+class StartIn(BaseModel):
+    start: int
+
+
+@router.post("/api/league/games/{gid}/start")
+async def set_game_start(gid: str, req: StartIn, x_owner_key: str | None = Header(default=None)) -> dict:
+    return await _run(store.set_game_start, gid, req.start, x_owner_key)
 
 
 @router.delete("/api/league/games/{gid}")
@@ -150,6 +160,8 @@ class TournamentIn(BaseModel):
     name: str = Field(default="はせけん麻雀大会", max_length=60)
     players: list[str] = Field(max_length=32)
     blocks: int
+    start_points: dict[str, int] | None = None  # {"4": 25000, "3": 35000}
+    owner_player: str | None = None
 
 
 def _public(t: dict) -> dict:
@@ -158,7 +170,8 @@ def _public(t: dict) -> dict:
 
 @router.post("/api/league/tournaments")
 async def add_tournament(req: TournamentIn) -> dict:
-    t, key = await _run(store.add_tournament, req.name, req.players, req.blocks)
+    t, key = await _run(store.add_tournament, req.name, req.players, req.blocks,
+                        req.start_points, req.owner_player)
     # 合言葉はこの1回だけ返す。オーナーの端末が保存しておき、以後の操作で X-Owner-Key に付ける
     return {"tournament": _public(t), "owner_key": key}
 
@@ -181,11 +194,14 @@ async def start_final(tid: str, x_owner_key: str | None = Header(default=None)) 
 class TournamentEdit(BaseModel):
     name: str | None = Field(default=None, max_length=60)
     blocks: list[list[str]] | None = Field(default=None, max_length=4)
+    start_points: dict[str, int] | None = None
+    owner_player: str | None = None  # 空文字でオーナーの旗を外す
 
 
 @router.patch("/api/league/tournaments/{tid}")
 async def edit_tournament(tid: str, req: TournamentEdit, x_owner_key: str | None = Header(default=None)) -> dict:
-    return _public(await _run(store.edit_tournament, tid, x_owner_key, req.name, req.blocks))
+    return _public(await _run(store.edit_tournament, tid, x_owner_key, req.name, req.blocks,
+                           req.start_points, req.owner_player))
 
 
 class EntriesIn(BaseModel):
