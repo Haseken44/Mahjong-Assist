@@ -20,6 +20,7 @@ const ui = {
   winner: null,                             // この局でアガった人
   loser: null,                              // ロンで振り込んだ人（必ず選ぶ）
   reg: null,                                // 登録ダイアログの状態
+  edit: null,                               // オーナーが編集中の大会 {tid, name, blocks, sel, entries, pick, nb}
 };
 
 // ---------- 小物 ----------
@@ -230,6 +231,10 @@ function tourCard(t) {
   head.append(h);
   card.append(head);
   const owner = !!ownerKey(t.id);
+  if (owner && ui.edit && ui.edit.tid === t.id) {
+    card.append(editView(t));
+    return card;
+  }
 
   if (t.status === "done" && t.king) {
     const k = el("div", "king");
@@ -278,6 +283,12 @@ function tourCard(t) {
     row.append(btn("新しい大会を作る", () => { ui.showSetup = true; renderTour(); }, "primary"));
   }
   if (row.children.length) card.append(row);
+  if (owner) {
+    const tools = el("div", "row");
+    tools.append(btn("大会を編集", () => startEdit(t)));
+    tools.append(btn("ほかの端末でもオーナー操作", () => shareOwner(t)));
+    card.append(tools);
+  }
   if (owner && t.status === "setup") {
     const del = btn("この大会をやめる", async () => {
       if (!confirm("この大会を削除しますか？（まだ始まっていないので成績には影響しません）")) return;
@@ -681,8 +692,176 @@ $("regDelete").addEventListener("click", async () => {
   } catch (e) { $("regError").textContent = e.message; $("regError").hidden = false; }
 });
 
+
+// ---------- オーナーの編集 ----------
+function startEdit(t) {
+  ui.edit = {
+    tid: t.id, name: t.name, blocks: t.blocks.map((b) => [...b]), sel: null,
+    entries: false, pick: new Set(t.players), nb: t.blocks.length,
+  };
+  renderTour();
+}
+function blockLocked(t, i) {
+  if (t.status === "setup") return false;
+  if (t.status !== "blocks") return true;
+  const g = game(t.block_games[i]);
+  return !!(g && (g.hands.length || g.finished));
+}
+function editView(t) {
+  const e = ui.edit;
+  const box = el("div", "edit-box");
+  const nameField = el("label", "field", "大会名");
+  const name = document.createElement("input");
+  name.type = "text";
+  name.maxLength = 30;
+  name.value = e.name;
+  name.addEventListener("input", () => (e.name = name.value));
+  nameField.append(name);
+  box.append(nameField);
+
+  const canBlocks = t.status === "setup" || t.status === "blocks";
+  if (canBlocks) {
+    box.append(el("h3", "sub", "ブロック分け・席順"));
+    box.append(el("p", "tip", "入れ替えたい2人を続けてタップすると、席（ブロックや東南西北）が入れ替わります。来られなくなった人は、タップしてから下の「控え」の人をタップすると交代します。"
+      + (t.status === "blocks" ? "開始後は、まだ点数を記録していないブロックだけ変えられます。" : "")));
+    const blocks = el("div", "blocks");
+    e.blocks.forEach((members, i) => {
+      const locked = blockLocked(t, i);
+      const b = el("div", "block" + (locked ? " locked" : ""));
+      const h = el("h3", null, `${String.fromCharCode(65 + i)}ブロック（${members.length === 4 ? "四麻" : "三麻"}）`);
+      if (locked) h.append(el("span", "state-tag", "記録あり・変更不可"));
+      b.append(h);
+      members.forEach((pid, si) => {
+        const m = el("button", "member edit-member");
+        m.type = "button";
+        m.disabled = locked;
+        m.setAttribute("aria-pressed", !!(e.sel && e.sel[0] === i && e.sel[1] === si));
+        m.append(whoEl(pid), el("span", "meta", SEATS[si]));
+        m.addEventListener("click", () => tapMember(t, i, si));
+        b.append(m);
+      });
+      blocks.append(b);
+    });
+    box.append(blocks);
+
+    const inUse = new Set(e.blocks.flat());
+    const bench = ui.data.players.filter((p) => !inUse.has(p.id));
+    box.append(el("h3", "sub", `控え（参加していない人） ${bench.length}人`));
+    const list = el("div", "pick-list");
+    bench.forEach((p) => {
+      const b = el("button");
+      b.type = "button";
+      b.append(avatarEl(p), el("span", "name", p.name));
+      b.addEventListener("click", () => {
+        if (!e.sel) { flash("先に、交代するメンバーをタップしてください"); return; }
+        e.blocks[e.sel[0]][e.sel[1]] = p.id;
+        e.sel = null;
+        renderTour();
+      });
+      list.append(b);
+    });
+    if (!bench.length) list.append(el("p", "tip", "控えの人はいません。"));
+    box.append(list);
+  } else {
+    box.append(el("p", "tip", "決勝が始まったので、変えられるのは大会名だけです。"));
+  }
+
+  if (t.status === "setup") {
+    const more = btn(e.entries ? "人数・ブロック数の変更を閉じる" : "参加者の人数・ブロック数を変える", () => { e.entries = !e.entries; renderTour(); });
+    more.className = "small-btn";
+    box.append(more);
+    if (e.entries) box.append(entriesView(t));
+  }
+
+  const row = el("div", "row");
+  row.append(btn("やめる", () => { ui.edit = null; renderTour(); }));
+  row.append(btn("保存する", async () => {
+    const body = { name: e.name };
+    if (canBlocks) body.blocks = e.blocks;
+    try {
+      await api("PATCH", `/api/league/tournaments/${t.id}`, body, { "X-Owner-Key": ownerKey(t.id) || "" });
+      ui.edit = null;
+      flash("大会を更新しました", false);
+      await refresh();
+    } catch (err) { flash(err.message); }
+  }, "primary"));
+  box.append(row);
+  return box;
+}
+function tapMember(t, i, si) {
+  const e = ui.edit;
+  if (!e.sel) e.sel = [i, si];
+  else if (e.sel[0] === i && e.sel[1] === si) e.sel = null;
+  else {
+    const [a, b] = e.sel;
+    [e.blocks[a][b], e.blocks[i][si]] = [e.blocks[i][si], e.blocks[a][b]];
+    e.sel = null;
+  }
+  renderTour();
+}
+function entriesView(t) {
+  const e = ui.edit;
+  const box = el("div", "entries");
+  box.append(el("p", "tip", `参加者を選び直して、ブロック数を選んでから「この参加者で抽選し直す」を押します（いま${e.pick.size}人）。`));
+  const list = el("div", "pick-list");
+  pickButtons(list, (pid) => e.pick.has(pid), null, (pid) => {
+    if (e.pick.has(pid)) e.pick.delete(pid); else e.pick.add(pid);
+    renderTour();
+  });
+  box.append(list);
+  const fs = formats(e.pick.size);
+  if (!fs.some((f) => f.blocks === e.nb)) e.nb = fs.length ? fs[0].blocks : null;
+  const fbox = el("div", "formats");
+  if (!fs.length) fbox.append(el("p", "none", "大会は9〜16人で、3〜4ブロックに分けられる人数にしてください。"));
+  fs.forEach((f) => {
+    const l = el("label");
+    const r = document.createElement("input");
+    r.type = "radio";
+    r.name = "editFormat";
+    r.checked = f.blocks === e.nb;
+    r.addEventListener("change", () => (e.nb = f.blocks));
+    l.append(r, el("span", null, f.label));
+    fbox.append(l);
+  });
+  box.append(fbox);
+  const go = btn("この参加者で抽選し直す", async () => {
+    try {
+      const H = { "X-Owner-Key": ownerKey(t.id) || "" };
+      await api("POST", `/api/league/tournaments/${t.id}/entries`, { players: [...e.pick], blocks: e.nb }, H);
+      if (e.name !== t.name) await api("PATCH", `/api/league/tournaments/${t.id}`, { name: e.name }, H);
+      ui.edit = null;
+      flash("参加者を変えて抽選し直しました", false);
+      await refresh();
+    } catch (err) { flash(err.message); }
+  }, "primary");
+  go.disabled = !fs.length;
+  box.append(go);
+  return box;
+}
+
+// オーナーの合言葉入りリンク。PC など別の端末で開くと、その端末でもオーナーとして操作できる
+async function shareOwner(t) {
+  const url = `${location.origin}/taikai#owner=${t.id}.${ownerKey(t.id)}`;
+  let copied = false;
+  try { await navigator.clipboard.writeText(url); copied = true; } catch (_) { /* 下で表示 */ }
+  prompt(copied
+    ? "オーナー用リンクをコピーしました。別の端末で開くと、その端末でも大会を操作できます（他の人には教えないでください）"
+    : "このリンクを別の端末で開くと、その端末でも大会を操作できます（他の人には教えないでください）", url);
+}
+function takeOwnerLink() {
+  const m = location.hash.match(/owner=([0-9a-f]+)\.([A-Za-z0-9_-]+)/);
+  if (!m) return;
+  const keys = ownerKeys();
+  keys[m[1]] = m[2];
+  save("mj-owner-keys", keys);
+  history.replaceState(null, "", location.pathname);  // 合言葉をアドレス欄に残さない
+  ui.tab = "tour";
+  flash("この端末でもオーナーとして操作できるようになりました", false);
+}
+
 // ---------- 起動 ----------
+takeOwnerLink();
 refresh();
 // 他の卓の点数も随時反映（画面を見ているときだけ）
-setInterval(() => { if (!document.hidden && !$("regDialog").open) refresh(); }, POLL_MS);
+setInterval(() => { if (!document.hidden && !$("regDialog").open && !ui.edit) refresh(); }, POLL_MS);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
