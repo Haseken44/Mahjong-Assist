@@ -781,14 +781,43 @@ class LeagueStore:
             self._save()
             return t
 
-    def delete_tournament(self, tid: str, key: str | None) -> None:
+    def _backup(self) -> str:
+        """今の中身を league.backup-<時刻>.json に退避する（サーバーで戻せるように）。戻り値はファイル名。"""
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        self.root.mkdir(parents=True, exist_ok=True)
+        backup = self.root / f"league.backup-{stamp}.json"
+        n = 2
+        while backup.exists():  # 同じ秒に2回消しても上書きしない
+            backup = self.root / f"league.backup-{stamp}-{n}.json"
+            n += 1
+        backup.write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding="utf-8")
+        return backup.name
+
+    def delete_tournament(self, tid: str, key: str | None, confirmed: bool = False) -> dict:
+        """大会をまるごと削除する（オーナーのみ）。
+
+        開始前の大会はそのまま消す。始まった大会（終わった大会も）は confirmed が必要で、
+        その大会の卓・局の記録もすべて消す＝各プレイヤーの通算成績・履歴・公開の成績ページからも消える
+        （ほかの大会や大会以外の対局の成績は残る。プレイヤー登録も残る）。
+        消す前の中身は league.backup-<時刻>.json に退避する。
+        """
         with self.lock:
             t = self._tour(tid)
             self._owner(t, key)
-            if t["status"] != "setup":
-                raise LeagueError("始まった大会は削除できません")
+            if t["status"] == "setup":
+                del self.data["tournaments"][tid]
+                self._save()
+                return {"games": 0, "backup": None}
+            if not confirmed:
+                raise LeagueError("始まった大会を削除するには、確認のため「削除」と入力してください")
+            backup = self._backup()
+            gids = {gid for gid, g in self.data["games"].items() if g.get("tournament") == tid}
+            gids |= {gid for gid in [*t["block_games"], t["final_game"]] if gid}
+            for gid in gids:
+                self.data["games"].pop(gid, None)
             del self.data["tournaments"][tid]
             self._save()
+            return {"games": len(gids), "backup": backup}
 
     def end_tournament(self, tid: str, key: str | None) -> dict:
         """始まった大会を途中で終わらせる（オーナーのみ）。
@@ -908,16 +937,14 @@ class LeagueStore:
             if missing:
                 raise Forbidden("リセットには、進行中のすべての大会のオーナー権限がいります（足りない大会："
                                 + "・".join(missing) + "）。その大会のオーナーに「ほかの端末でもオーナー操作」のリンクをもらうか、大会を終了してもらってください")
-            stamp = time.strftime("%Y%m%d-%H%M%S")
-            self.root.mkdir(parents=True, exist_ok=True)
-            backup = self.root / f"league.backup-{stamp}.json"
-            backup.write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding="utf-8")
+            backup = self._backup()
+            stamp = backup[len("league.backup-"):-len(".json")]
             players = self.data["players"] if keep_players else {}
             if not keep_players and self.avatar_dir.exists() and any(self.avatar_dir.iterdir()):
                 os.replace(self.avatar_dir, self.root / f"avatars.backup-{stamp}")
             self.data = {"players": players, "games": {}, "tournaments": {}}
             self._save()
-            return {"backup": backup.name, "players": len(players)}
+            return {"backup": backup, "players": len(players)}
 
     # ---------- 集計 ----------
     def stats(self, games: list[dict] | None = None, pids=None) -> dict[str, dict]:

@@ -407,10 +407,41 @@ function tourCard(t) {
       await ownerAction(t, "/end", "POST", "大会を終了しました。「新しい大会を作る」で最初から始められます");
     }, "small-btn danger"));
   }
+  if (owner && t.status !== "setup") {
+    card.append(btn("大会を削除する…", () => openDeleteTour(t), "small-btn danger"));
+  }
   if (!owner && t.status === "setup") card.append(el("p", "tip", "オーナーが「大会開始」を押すと、各卓の点数表ができます。"));
   if (!owner && t.status === "blocks") card.append(el("p", "tip", "全ブロックが終わったら、オーナーが決勝を始めます。"));
   return card;
 }
+
+// ---------- 大会の削除（始まった大会・終わった大会。その大会の成績も消える） ----------
+let delTour = null;
+function openDeleteTour(t) {
+  delTour = t;
+  $("delTourName").textContent = `「${t.name}」`;
+  $("delTourWord").value = "";
+  $("delTourError").hidden = true;
+  $("delTourDo").disabled = true;
+  $("delTourDialog").showModal();
+}
+$("delTourWord").addEventListener("input", () => { $("delTourDo").disabled = $("delTourWord").value.trim() !== "削除"; });
+$("delTourCancel").addEventListener("click", () => $("delTourDialog").close());
+$("delTourForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const t = delTour;
+  if (!t) return;
+  try {
+    await api("POST", `/api/league/tournaments/${t.id}/delete`, { confirm: $("delTourWord").value.trim() },
+      { "X-Owner-Key": ownerKey(t.id) || "" });
+    $("delTourDialog").close();
+    flash(`「${t.name}」を削除しました（この大会の成績も消しました）`, false);
+    await refresh();
+  } catch (e) {
+    $("delTourError").textContent = e.message;
+    $("delTourError").hidden = false;
+  }
+});
 
 // 大会ごとの成績表（その大会の対局だけ。新しい大会は0から始まる）
 function standingsTable(t) {

@@ -217,3 +217,4 @@ button:disabled.danger { opacity: .45; }
 .link-btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: inherit; flex: 1 1 auto; text-align: center; min-height: 36px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); font-size: .85rem; }
 .topbar h1 + .top-link { margin-left: auto; }
 .topbar .top-link + .top-link { margin-left: 6px; }
+.del-list { margin: 4px 0 10px; padding-left: 1.2em; font-size: .92rem; line-height: 1.6; }

@@ -239,8 +239,20 @@ async def change_entries(tid: str, req: EntriesIn, x_owner_key: str | None = Hea
 
 @router.delete("/api/league/tournaments/{tid}")
 async def delete_tournament(tid: str, x_owner_key: str | None = Header(default=None)) -> dict:
-    await _run(store.delete_tournament, tid, x_owner_key)
-    return {"ok": True}
+    """開始前の大会を消す（始まった大会は下の /delete で確認つき）。"""
+    return {"ok": True, **await _run(store.delete_tournament, tid, x_owner_key)}
+
+
+class DeleteTourIn(BaseModel):
+    confirm: str  # 誤操作よけ：「削除」と入力してもらう
+
+
+@router.post("/api/league/tournaments/{tid}/delete")
+async def delete_tournament_all(tid: str, req: DeleteTourIn, x_owner_key: str | None = Header(default=None)) -> dict:
+    """大会をまるごと削除する（その大会の対局と、個人成績に入っていたその大会の点数も消える）。"""
+    if req.confirm.strip() != "削除":
+        raise HTTPException(status_code=400, detail="確認のため「削除」と入力してください")
+    return {"ok": True, **await _run(store.delete_tournament, tid, x_owner_key, True)}
 
 
 @router.post("/api/league/tournaments/{tid}/end")

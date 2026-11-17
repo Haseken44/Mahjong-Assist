@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
   <link rel="stylesheet" href="/static/style.css?v=15">
-  <link rel="stylesheet" href="/static/league.css?v=13">
+  <link rel="stylesheet" href="/static/league.css?v=14">
 </head>
 <body>
   <header class="topbar">
@@ -265,8 +265,28 @@
     </form>
   </dialog>
 
+  <dialog id="delTourDialog" class="sheet">
+    <form method="dialog" id="delTourForm">
+      <h2>大会を削除しますか？</h2>
+      <p class="tip"><b id="delTourName"></b> を、記録ごと削除します。</p>
+      <ul class="del-list">
+        <li>この大会の卓・1局ごとの記録・キングがすべて消えます</li>
+        <li>各プレイヤーの<b>個人成績（通算・履歴）からも、この大会の点数がすべて消えます</b></li>
+        <li>公開の成績ページからも消えます</li>
+        <li>ほかの大会・大会以外の対局の成績と、プレイヤー登録はそのまま残ります</li>
+      </ul>
+      <p class="tip">消す前にサーバーへ控え（league.backup-日時.json）を残します。必要なら先に「📄 記録を Markdown で保存」で記録を保存してください。</p>
+      <label class="field">確認のため「削除」と入力 <input id="delTourWord" type="text" autocomplete="off" placeholder="削除"></label>
+      <p id="delTourError" class="note" hidden></p>
+      <div class="row">
+        <button type="button" id="delTourCancel">やめる</button>
+        <button type="submit" id="delTourDo" class="danger" disabled>削除する</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=12"></script>
+  <script src="/static/league.js?v=13"></script>
 </body>
 </html>
