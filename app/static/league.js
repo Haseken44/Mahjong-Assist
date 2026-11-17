@@ -382,6 +382,11 @@ function tourCard(t) {
     row.append(b);
   }
   if (row.children.length) card.append(row);
+  // 記録の保存（ノートPCなど）と、誰でも見られる公開の成績ページ
+  const save = el("div", "row save-row");
+  save.append(linkBtn("📄 記録を Markdown で保存", `/api/league/tournaments/${t.id}/export.md`, true),
+    linkBtn("🌐 公開の成績ページ", `/seiseki/${t.id}`));
+  card.append(save);
   if (owner && t.status !== "done") card.append(devicesBox(t));
   if (owner) {
     const tools = el("div", "row");
@@ -554,6 +559,14 @@ function renderMe() {
     bar.append(row);
   });
   bar.hidden = !bar.children.length;
+}
+
+function linkBtn(text, href, download = false) {
+  const a = el("a", "small-btn link-btn", text);
+  a.href = href;
+  // 保存はサーバーが Content-Disposition で日本語のファイル名を付ける（download 属性は付けない）
+  if (!download) a.target = "_blank";
+  return a;
 }
 
 function btn(text, onClick, cls = "") {
