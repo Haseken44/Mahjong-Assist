@@ -333,3 +333,11 @@ def test_five_players_two_blocks_nima_final(store):
     store.start_final(t["id"], key)
     final = store.data["games"][t["final_game"]]
     assert len(final["players"]) == 2 and final["start"] == 25000
+
+
+def test_league_api_nima_free_game():
+    client = TestClient(app)
+    ids = [client.post("/api/league/players", json={"name": f"二麻{i}", "emoji": "🐼"}).json()["id"] for i in range(2)]
+    r = client.post("/api/league/games", json={"players": ids})
+    assert r.status_code == 200 and len(r.json()["players"]) == 2
+    assert client.post("/api/league/games", json={"players": ids[:1]}).status_code == 422

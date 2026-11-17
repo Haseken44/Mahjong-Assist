@@ -152,3 +152,12 @@ def test_hand_is_never_shared_between_players():
     # 見本のファイル名は乱数だけ（時刻や並び順を含まない）
     for f in detector.store.root.rglob("*.png"):
         assert re.fullmatch(r"[0-9a-f]{32}\.png", f.name)
+
+
+def test_api_yakuman_list_and_nima_analyze():
+    r = client.get("/api/yakuman")
+    assert r.status_code == 200 and any(y["name"] == "大三元" for y in r.json()["yakuman"])
+    r = client.post("/api/analyze", json={"tiles": "5z 5z 6z 6z 6z 7z 2m 3m 4m 1p 2p 3p 9s 9s".split(), "settings": {"players": 2}})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["nima"] and body["hints"][0]["name"] == "大三元" and "役満狙いなら" in body["message"]

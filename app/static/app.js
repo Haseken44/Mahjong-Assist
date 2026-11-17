@@ -99,18 +99,25 @@ const SANMA_EXCLUDED = new Set(["2m", "3m", "4m", "5m", "6m", "7m", "8m", "0m"])
 
 function playersValue() {
   const el = document.querySelector("input[name=players]:checked");
-  return el && el.value === "3" ? 3 : 4;
+  return el ? (+el.value || 4) : 4;
 }
 
 // 四人／三人の切り替え：三麻では萬子2〜8と北家を使わない
 function applyPlayers() {
   const sanma = playersValue() === 3;
+  const nima = playersValue() === 2;
   document.querySelectorAll(".sanma-only").forEach((el) => (el.hidden = !sanma));
+  document.querySelectorAll(".nima-only").forEach((el) => (el.hidden = !nima));
+  // 二人麻雀の自風は東（親）か南（子）だけ
+  const west = $("seatWind").querySelector("option[value=west]");
+  west.hidden = nima;
+  west.disabled = nima;
   document.querySelectorAll("#palette .tile").forEach((el) => (el.hidden = sanma && SANMA_EXCLUDED.has(el.dataset.tile)));
   const north = $("seatWind").querySelector("option[value=north]");
-  north.hidden = sanma;
-  north.disabled = sanma;
+  north.hidden = sanma || nima;
+  north.disabled = sanma || nima;
   if (sanma && $("seatWind").value === "north") $("seatWind").value = "west";
+  if (nima && ["west", "north"].includes($("seatWind").value)) $("seatWind").value = "south";
   if (sanma) {
     state.hand = state.hand.filter((t) => !SANMA_EXCLUDED.has(t));
     state.dora = state.dora.map((t) => (t && SANMA_EXCLUDED.has(t) ? null : t));
@@ -131,7 +138,7 @@ function saveSettings() {
 function loadSettings() {
   try {
     const v = JSON.parse(localStorage.getItem("mj-settings") || "{}");
-    if (v.players === 3) document.querySelector("input[name=players][value='3']").checked = true;
+    if (v.players === 3 || v.players === 2) document.querySelector(`input[name=players][value='${v.players}']`).checked = true;
     if (v.rules && typeof v.rules === "object") state.rules = { ...RULE_DEFAULTS, ...v.rules };
     SETTING_IDS.forEach((id) => {
       if (!(id in v)) return;
@@ -474,9 +481,10 @@ function waitItem(w) {
   }
   let meta = w.ok ? `${w.han}翻${w.fu ? w.fu + "符" : ""}${w.level ? " " + w.level : ""} ${w.yaku.join("・")}` : (w.error || "");
   if (w.riichi_needed) meta = "※リーチが必要（役なし）　" + meta;
+  if (w.nima_ok === false) meta = "※二麻では役満でないのでアガれません　" + meta;
   const body = document.createElement("div");
   body.append(span(`残り${w.remaining}枚`, "meta nowrap"), document.createElement("br"), span(meta, "meta"));
-  return li([tilesInline([w.tile]), body, pts]);
+  return li([tilesInline([w.tile]), body, pts], w.nima_ok === false ? "no-nima" : "");
 }
 
 // 親・子を入れ替えた場合の点数を、参考としてカードに足す
@@ -567,7 +575,7 @@ function renderAnalysis(a) {
     sw.append(span("あなたは", "meta"));
     [["親", "east"], ["子", "south"]].forEach(([label, wind]) => {
       const b = document.createElement("button");
-      b.textContent = label === "親" ? "親（東）" : "子（南・西・北）";
+      b.textContent = label === "親" ? "親（東）" : (playersValue() === 2 ? "子（南）" : playersValue() === 3 ? "子（南・西）" : "子（南・西・北）");
       b.setAttribute("aria-pressed", String(label === me));
       b.addEventListener("click", () => {
         if (label === me) return;
@@ -619,11 +627,52 @@ function renderAnalysis(a) {
       const d = span(h.distance === 0 ? "成立/可能" : `あと${h.distance}`, "dist" + (h.distance === 0 ? " ok" : ""));
       const body = document.createElement("div");
       body.append(span(`${h.name}　${h.han}`), document.createElement("br"), span(h.note, "meta"));
-      return li([d, body], "hint");
+      return li([d, body], "hint" + (h.yakuman ? " yakuman" : ""));
     });
-    $("hints").append(section("狙える役", items));
+    const sec = section(a.nima ? "狙える役満（二麻は役満だけアガれます）" : "狙える役", items);
+    $("hints").append(sec);
+    if (a.nima) {
+      const b = document.createElement("button");
+      b.className = "small-inline";
+      b.textContent = "役満一覧を見る";
+      b.addEventListener("click", openYakuman);
+      $("hints").append(b);
+    }
+  } else if (a.nima) {
+    $("hints").append(section("狙える役満", [li([span("いまの手牌から近い役満はまだありません。字牌や1・9の牌、同じ牌を集めてみましょう", "meta")])]));
   }
 }
+
+// ---------- 役満一覧 ----------
+let yakumanCache = null;
+async function openYakuman() {
+  const dlg = $("yakumanDialog");
+  if (!yakumanCache) {
+    try {
+      yakumanCache = (await (await fetch("/api/yakuman")).json()).yakuman;
+    } catch (_) {
+      flash("役満一覧を読み込めませんでした");
+      return;
+    }
+    const list = $("yakumanList");
+    list.replaceChildren();
+    yakumanCache.forEach((y) => {
+      const item = document.createElement("li");
+      const name = document.createElement("div");
+      name.className = "yn";
+      name.textContent = y.name;
+      const r = document.createElement("small");
+      r.textContent = y.reading;
+      name.append(r);
+      item.append(name, span(y.cond, "cond"), span(y.desc, "meta"));
+      if (y.example && y.example.length) item.append(tilesInline(y.example));
+      list.append(item);
+    });
+  }
+  if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", "");
+}
+document.querySelectorAll(".yakuman-btn").forEach((b) => b.addEventListener("click", openYakuman));
+$("yakumanClose").addEventListener("click", () => $("yakumanDialog").close());
 
 // ---------- スマートグラス表示 ----------
 // スマホの画面がそのままグラスに映る（ミラーリング）。黒はグラスでは透明に見えるので、背景は真っ黒にし、
@@ -1153,7 +1202,11 @@ function init() {
     $("tableKans").value = 0; changed();
   });
   $("demoBtn").addEventListener("click", () => {
-    if (playersValue() === 3) {
+    if (playersValue() === 2) {
+      // 二麻の例：大三元まであと少しの配牌
+      state.hand = ["5z", "5z", "6z", "6z", "6z", "7z", "2m", "3m", "4m", "1p", "2p", "3p", "9s", "9s"];
+      state.dora = ["1m"];
+    } else if (playersValue() === 3) {
       state.hand = ["1m", "1m", "0p", "6p", "7p", "2p", "3p", "4p", "3s", "4s", "6s", "7s", "8s", "4z"];
       state.dora = ["1m"];
     } else {

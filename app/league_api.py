@@ -90,7 +90,7 @@ async def delete_player(pid: str) -> dict:
 
 
 class GameIn(BaseModel):
-    players: list[str] = Field(min_length=3, max_length=4)
+    players: list[str] = Field(min_length=2, max_length=4)
     title: str = Field(default="", max_length=60)
     start: int | None = None  # 持ち点（省略で四麻25000・三麻35000）
 

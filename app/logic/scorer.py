@@ -156,9 +156,15 @@ def _payments(cost: dict, s: RoundSettings, tsumo: bool) -> tuple[int, str, list
     note = f"（供託 {kyoutaku}点も受け取る）" if kyoutaku else ""
     if not tsumo:
         ron = cost["main"] + per_honba * s.honba
+        if s.is_nima:
+            return ron + kyoutaku, f"ロン 相手から {ron}点{note}", [{"who": "相手（ロンされた人）", "points": ron}]
         return ron + kyoutaku, f"ロン 放銃した人から {ron}点{note}", [{"who": "放銃した人（ロンされた人）", "points": ron}]
 
     main, add = cost["main"], cost["additional"]
+    if s.is_nima:
+        # 二麻のツモ：相手1人が四麻の3人分をまとめて払う（ロンと同じ点数）
+        whole = (main * 3 if s.is_dealer else main + add * 2) + per_honba * s.honba
+        return whole + kyoutaku, f"ツモ 相手から {whole}点（二麻）{note}", [{"who": "相手", "points": whole}]
     if s.players == 3 and not s.tsumo_son:
         # ツモ損なし：いない北家の分を2人で折半する
         if s.is_dealer:

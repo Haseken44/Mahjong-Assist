@@ -66,6 +66,14 @@ async def rules() -> dict:
     return {"presets": {k: v.model_dump() for k, v in PRESETS.items()}, "labels": RULE_LABELS}
 
 
+@app.get("/api/yakuman")
+async def yakuman() -> dict:
+    """役満一覧（二麻はアガリが役満だけなので、いつでも見られるようにする）。"""
+    from .logic.yakuman import yakuman_list
+
+    return {"yakuman": yakuman_list()}
+
+
 @app.get("/api/info")
 async def info() -> dict:
     # 牌ごとの登録数は返さない（誰かが学習した直後の増え方から手牌を推測されないように）

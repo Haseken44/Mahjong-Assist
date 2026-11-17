@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
   <link rel="stylesheet" href="/static/style.css?v=13">
-  <link rel="stylesheet" href="/static/league.css?v=6">
+  <link rel="stylesheet" href="/static/league.css?v=7">
 </head>
 <body>
   <header class="topbar">
@@ -57,6 +57,7 @@
         <div class="card">
           <div class="section-head">
             <h2 id="gTitle"></h2>
+            <button id="gYakuman" class="small-btn" hidden>役満一覧</button>
             <button id="gBack" class="small-btn">一覧へ</button>
           </div>
           <div id="gBoard" class="board"></div>
@@ -74,7 +75,7 @@
 
         <div class="card" id="gEntry">
           <h2 id="hTitle">この局の結果を記録</h2>
-          <p id="hNima" class="edit-bar nima" hidden>二麻（2人麻雀）のアガリは役満だけです。子は32,000点、親は48,000点（本場を足した点数）を入れます。ツモは相手が全部払います。</p>
+          <p id="hNima" class="edit-bar nima" hidden>二麻（2人麻雀）のアガリは役満だけです。子は32,000点、親は48,000点（本場を足した点数）を入れます。ツモは相手が全部払います。 <button type="button" class="small-btn" data-yakuman>役満一覧を見る</button></p>
           <p id="hEditBar" class="edit-bar" hidden></p>
           <div class="seg" role="radiogroup">
             <label><input type="radio" name="hkind" value="ron" checked> ロン</label>
@@ -192,8 +193,18 @@
     </form>
   </dialog>
 
+  <!-- 役満一覧（二麻はアガリが役満だけなので、いつでも開けるようにする） -->
+  <dialog id="yakumanDialog" class="sheet">
+    <div class="section-head">
+      <h2>役満一覧 <small>やくまん＝いちばん高い役</small></h2>
+      <button type="button" id="yakumanClose" class="small-btn">閉じる</button>
+    </div>
+    <p class="tip">子は32,000点、親は48,000点（ダブル役満は2倍）。二麻（2人麻雀）ではアガれるのは役満だけです。</p>
+    <ul id="yakumanList" class="yakuman-list"></ul>
+  </dialog>
+
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=5"></script>
+  <script src="/static/league.js?v=6"></script>
 </body>
 </html>

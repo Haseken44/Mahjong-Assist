@@ -49,7 +49,7 @@ class MeldIn(BaseModel):
 
 
 class RoundSettings(BaseModel):
-    players: int = Field(4, description="4=四人麻雀, 3=三人麻雀（さんま）")
+    players: int = Field(4, description="4=四人麻雀, 3=三人麻雀（さんま）, 2=二人麻雀（四麻と同じルールでアガリは役満のみ）")
     rules: Rules = Field(default_factory=Rules)
     nukidora: int = Field(0, ge=0, le=4, description="三麻：抜いた北の枚数（1枚につきドラ1）")
     seat_wind: str = Field("east", description="自風 east/south/west/north（east=親）")
@@ -81,8 +81,8 @@ class RoundSettings(BaseModel):
     @field_validator("players")
     @classmethod
     def _players(cls, v: int) -> int:
-        if v not in (3, 4):
-            raise ValueError("人数は 4 か 3")
+        if v not in (2, 3, 4):
+            raise ValueError("人数は 4・3・2 のどれか")
         return v
 
     @field_validator("dora_indicators", "ura_indicators")
@@ -127,6 +127,8 @@ class RoundSettings(BaseModel):
                 raise ValueError("このルールの三人麻雀ではチーできません")
             if not r.sanma_nukidora and self.nukidora:
                 raise ValueError("このルールでは北抜きはありません")
+        elif self.players == 2 and self.seat_wind in ("west", "north"):
+            raise ValueError("二人麻雀の自風は東（親）か南（子）です")
         elif self.nukidora:
             raise ValueError("抜きドラは三人麻雀だけのルールです")
         if not r.aka_dora:
@@ -138,6 +140,11 @@ class RoundSettings(BaseModel):
     @property
     def is_sanma(self) -> bool:
         return self.players == 3
+
+    @property
+    def is_nima(self) -> bool:
+        """二人麻雀：牌もルールも四麻と同じで、アガリは役満だけ。"""
+        return self.players == 2
 
     @property
     def is_dealer(self) -> bool:

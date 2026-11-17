@@ -439,6 +439,7 @@ function hkind() { return document.querySelector("input[name=hkind]:checked").va
 
 function renderGameDetail(g) {
   $("gTitle").textContent = g.title;
+  $("gYakuman").hidden = g.players.length !== 2;
   const board = $("gBoard");
   board.replaceChildren();
   g.players.forEach((pid, i) => {
@@ -1036,9 +1037,43 @@ function takeOwnerLink() {
   flash("この端末でもオーナーとして操作できるようになりました", false);
 }
 
+// ---------- 役満一覧（二麻はアガリが役満だけ） ----------
+let yakumanLoaded = false;
+async function openYakuman() {
+  if (!yakumanLoaded) {
+    try {
+      const { yakuman } = await api("GET", "/api/yakuman");
+      const list = $("yakumanList");
+      list.replaceChildren();
+      yakuman.forEach((y) => {
+        const item = el("li");
+        const name = el("div", "yn", y.name);
+        name.append(el("small", null, y.reading));
+        item.append(name, el("span", "cond", y.cond), el("span", null, y.desc));
+        if (y.example && y.example.length) {
+          const ex = el("div", "ex");
+          y.example.forEach((t) => {
+            const img = document.createElement("img");
+            img.src = `/static/tiles/${t}.webp?v=4`;
+            img.alt = t;
+            img.loading = "lazy";
+            ex.append(img);
+          });
+          item.append(ex);
+        }
+        list.append(item);
+      });
+      yakumanLoaded = true;
+    } catch (e) { flash(e.message); return; }
+  }
+  $("yakumanDialog").showModal();
+}
+document.querySelectorAll("[data-yakuman], #gYakuman").forEach((b) => b.addEventListener("click", openYakuman));
+$("yakumanClose").addEventListener("click", () => $("yakumanDialog").close());
+
 // ---------- 起動 ----------
 takeOwnerLink();
 refresh();
 // 他の卓の点数も随時反映（画面を見ているときだけ）
-setInterval(() => { if (!document.hidden && !$("regDialog").open && !ui.edit) refresh(); }, POLL_MS);
+setInterval(() => { if (!document.hidden && !$("regDialog").open && !$("yakumanDialog").open && !ui.edit) refresh(); }, POLL_MS);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });

@@ -325,3 +325,59 @@ def test_score_both_shows_other_seat_tsumo():
 
     ron, ron_child = d["ron"]["total"], d["ron_other"]["total"]
     assert ron > ron_child  # 親のロンは子のロンより高い（約1.5倍）
+
+
+# ---------- 二麻（2人麻雀）と役満のヒント ----------
+from app.logic.yakuman import yakuman_hints, yakuman_list  # noqa: E402
+
+
+def test_yakuman_list_has_examples():
+    names = [y["name"] for y in yakuman_list()]
+    assert "国士無双" in names and "大三元" in names and "四暗刻" in names
+    kokushi = next(y for y in yakuman_list() if y["name"] == "国士無双")
+    assert len(kokushi["example"]) == 14
+
+
+def test_yakuman_hints_daisangen_and_kokushi():
+    s = RoundSettings(players=2)
+    hs = yakuman_hints("5z 5z 6z 6z 6z 7z 2m 3m 4m 1p 2p 3p 9s 9s".split(), s)
+    assert hs[0]["name"] == "大三元" and hs[0]["distance"] == 3
+    hs = yakuman_hints("1m 9m 1p 9p 1s 9s 1z 2z 3z 4z 5z 6z 7z".split(), s)
+    assert hs[0]["name"] == "国士無双" and hs[0]["distance"] == 1
+
+
+def test_nima_only_yakuman_wins():
+    s = RoundSettings(players=2)
+    r = analyze("1m 2m 3m 4p 5p 6p 7s 8s 9s 2z 2z 7z 7z 7z".split(), s)
+    assert r["nima"] and r["nima_ok"] is False and "役満でないとアガれません" in r["message"]
+    assert all(h["han"] == "役満" for h in r["hints"])
+    r = analyze("1m 9m 1p 9p 1s 9s 1z 2z 3z 4z 5z 6z 7z 7z".split(), RoundSettings(players=2, is_tsumo=True, seat_wind="south"))
+    assert r["nima_ok"] and r["score"]["total"] == 64000  # 十三面待ち（ダブル役満）を子がツモ：相手が全額
+    assert "相手から" in r["score"]["payment"]
+
+
+def test_nima_discard_keeps_yakuman():
+    r = analyze("5z 5z 6z 6z 6z 7z 2m 3m 4m 1p 2p 3p 9s 9s".split(), RoundSettings(players=2))
+    assert r["nima_discard"]["discard"] not in ("5z", "6z", "7z")
+    assert "役満狙いなら" in r["message"]
+
+
+def test_nima_seat_wind():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        RoundSettings(players=2, seat_wind="west")
+
+
+def test_yakuman_hint_in_yonma_when_close():
+    r = analyze("1m 9m 1p 9p 1s 9s 1z 2z 3z 4z 5z 6z 7z 3m".split(), RoundSettings())
+    assert any(h["name"] == "国士無双" and "役満が狙えます" in h["note"] for h in r["hints"])
+
+
+def test_nima_discard_waits_flagged():
+    from app.logic.analyzer import analyze
+    s = RoundSettings(players=2)
+    r = analyze("5z 5z 6z 6z 6z 7z 2m 3m 4m 1p 2p 3p 9s 9s".split(), s)
+    waits = [w for o in r["discards"] for w in (o.get("waits") or [])]
+    assert waits and all("nima_ok" in w for w in waits)
