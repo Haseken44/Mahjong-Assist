@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f5132">
   <title>はせけん麻雀大会</title>
   <link rel="stylesheet" href="/static/style.css?v=13">
-  <link rel="stylesheet" href="/static/league.css?v=2">
+  <link rel="stylesheet" href="/static/league.css?v=3">
 </head>
 <body>
   <header class="topbar">
@@ -31,6 +31,14 @@
         <label class="field">大会名
           <input id="tourName" type="text" maxlength="30" value="はせけん麻雀大会">
         </label>
+        <label class="field">オーナー（設定する人。名前の横に🇯🇵の旗が付きます）
+          <select id="tourOwner"></select>
+        </label>
+        <h3 class="sub">持ち点 <small>大会を始めるまでは自由に変えられます</small></h3>
+        <div class="start-points">
+          <label class="field">四麻（4人卓） <input id="tourStart4" type="number" min="1000" max="200000" step="1000" value="25000" inputmode="numeric"></label>
+          <label class="field">三麻（3人卓） <input id="tourStart3" type="number" min="1000" max="200000" step="1000" value="35000" inputmode="numeric"></label>
+        </div>
         <h3 class="sub">参加者を選ぶ <small id="tourCount">0人</small></h3>
         <p class="tip">名前とアバターを登録した人だけが選べます。まだの人は下の「＋プレイヤー登録」から。</p>
         <div id="tourPick" class="pick-list"></div>
@@ -51,6 +59,12 @@
             <button id="gBack" class="small-btn">一覧へ</button>
           </div>
           <div id="gBoard" class="board"></div>
+          <div id="gStartBox" class="start-edit" hidden>
+            <label class="field">持ち点（1局目を記録するまで変えられます）
+              <input id="gStart" type="number" min="1000" max="200000" step="1000" inputmode="numeric">
+            </label>
+            <button id="gStartSave" class="small-btn">持ち点を変える</button>
+          </div>
           <label class="field inline-field">いまの親（おや）
             <select id="gDealer"></select>
           </label>
@@ -107,6 +121,9 @@
           <p class="tip">卓を囲む3人か4人をタップします。席順（東・南・西・北）は「対局を始める」で自動の抽選になります。</p>
           <div id="newPick" class="pick-list"></div>
           <button class="add-player-btn" data-open-register>＋プレイヤー登録</button>
+          <label class="field">持ち点（空欄なら四麻25,000点・三麻35,000点）
+            <input id="newStart" type="number" min="1000" max="200000" step="1000" inputmode="numeric" placeholder="例: 30000">
+          </label>
           <div class="row"><button id="newGame" class="primary" disabled>対局を始める</button></div>
         </div>
         <div class="card">
@@ -169,6 +186,6 @@
 
   <div id="toast" class="toast" role="status"></div>
   <footer class="foot">ここに保存されるのは名前・アバター・点数だけです。手牌やカメラの映像は保存も共有もしません。<br>v0.5</footer>
-  <script src="/static/league.js?v=2"></script>
+  <script src="/static/league.js?v=3"></script>
 </body>
 </html>

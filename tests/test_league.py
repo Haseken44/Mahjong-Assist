@@ -224,3 +224,32 @@ def test_owner_edits_tournament(store):
         store.change_entries(t["id"], key, ids[:12], 3)
     store.edit_tournament(t["id"], key, name="第2回")
     assert g0["title"].startswith("第2回")
+
+
+def test_start_points_and_owner_flag(store):
+    ids = _players(store, 12)
+    with pytest.raises(LeagueError):
+        store.add_tournament("x", ids, 4, start_points={"4": 25050})
+    t, key = store.add_tournament("x", ids, 4, start_points={"4": 30000, "3": 40000}, owner_player=ids[0])
+    assert t["owner_player"] == ids[0] and t["start_points"] == {"4": 30000, "3": 40000}
+    store.edit_tournament(t["id"], key, start_points={"4": 30000, "3": 50000}, owner_player=ids[1])
+    assert t["owner_player"] == ids[1]
+    store.start_tournament(t["id"], key)
+    g0, g1 = (store.data["games"][gid] for gid in t["block_games"][:2])
+    assert g0["start"] == 50000 and set(g0["points"].values()) == {50000}  # 三麻の卓
+    # 開始後でも、まだ記録のない卓には反映される
+    store.add_hand(g1["id"], {"kind": "ron", "winner": g1["players"][0], "loser": g1["players"][1], "points": 1000})
+    store.edit_tournament(t["id"], key, start_points={"4": 25000, "3": 35000})
+    assert g0["start"] == 35000 and g1["start"] == 50000
+    # 卓ごとの変更：大会の卓はオーナーだけ、記録後は不可
+    with pytest.raises(Forbidden):
+        store.set_game_start(g0["id"], 40000)
+    store.set_game_start(g0["id"], 40000, key)
+    assert g0["points"][g0["players"][0]] == 40000
+    with pytest.raises(LeagueError):
+        store.set_game_start(g1["id"], 40000, key)
+    # 大会以外の対局
+    g = store.add_game(ids[:4], start=30000)
+    assert g["start"] == 30000
+    store.set_game_start(g["id"], 27000)
+    assert set(g["points"].values()) == {27000}
