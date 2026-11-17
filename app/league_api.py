@@ -178,6 +178,26 @@ async def start_final(tid: str, x_owner_key: str | None = Header(default=None)) 
     return _public(await _run(store.start_final, tid, x_owner_key))
 
 
+class TournamentEdit(BaseModel):
+    name: str | None = Field(default=None, max_length=60)
+    blocks: list[list[str]] | None = Field(default=None, max_length=4)
+
+
+@router.patch("/api/league/tournaments/{tid}")
+async def edit_tournament(tid: str, req: TournamentEdit, x_owner_key: str | None = Header(default=None)) -> dict:
+    return _public(await _run(store.edit_tournament, tid, x_owner_key, req.name, req.blocks))
+
+
+class EntriesIn(BaseModel):
+    players: list[str] = Field(max_length=32)
+    blocks: int
+
+
+@router.post("/api/league/tournaments/{tid}/entries")
+async def change_entries(tid: str, req: EntriesIn, x_owner_key: str | None = Header(default=None)) -> dict:
+    return _public(await _run(store.change_entries, tid, x_owner_key, req.players, req.blocks))
+
+
 @router.delete("/api/league/tournaments/{tid}")
 async def delete_tournament(tid: str, x_owner_key: str | None = Header(default=None)) -> dict:
     await _run(store.delete_tournament, tid, x_owner_key)

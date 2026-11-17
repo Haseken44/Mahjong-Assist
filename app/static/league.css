@@ -112,3 +112,10 @@ dialog.sheet h2 { margin-top: 0; }
 .who-pick.loser button[aria-pressed=true] { background: var(--accent); }
 .who-pick button:disabled { opacity: .35; }
 .who-pick .avatar { width: 44px; height: 44px; }
+
+/* オーナーの編集 */
+.edit-box { display: grid; gap: 6px; }
+.edit-member { width: 100%; text-align: left; padding: 6px 8px; min-height: 48px; }
+.edit-member[aria-pressed=true] { background: #d4a017; color: #1d1d1b; border-color: transparent; }
+.block.locked { opacity: .6; }
+.entries { display: grid; gap: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: 10px; }

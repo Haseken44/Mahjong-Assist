@@ -459,6 +459,79 @@ class LeagueStore:
             self._save()
             return t
 
+    def _check_blocks(self, blocks: list[list[str]]) -> list[list[str]]:
+        if not isinstance(blocks, list) or len(blocks) not in (3, 4):
+            raise LeagueError("ブロックは3つか4つです")
+        flat = [pid for b in blocks for pid in b]
+        if len(set(flat)) != len(flat):
+            raise LeagueError("同じプレイヤーが2つの席に入っています")
+        for b in blocks:
+            if len(b) not in (3, 4):
+                raise LeagueError("1ブロックは3人（三麻）か4人（四麻）です")
+        for pid in flat:
+            self._player(pid)
+        return [list(b) for b in blocks]
+
+    def edit_tournament(self, tid: str, key: str | None, name: str | None = None,
+                        blocks: list[list[str]] | None = None) -> dict:
+        """オーナーが大会を編集する。
+
+        - 大会名：いつでも変えられる
+        - ブロック分け（席順も）：開始前は自由に。開始後は、まだ1局も記録していないブロックだけ
+          入れ替え・差し替えができる（来られなくなった人の代わりなど）。決勝が始まったら変えられない
+        """
+        with self.lock:
+            t = self._tour(tid)
+            self._owner(t, key)
+            if name is not None:
+                t["name"] = " ".join(name.split())[:30] or t["name"]
+            if blocks is not None:
+                blocks = self._check_blocks(blocks)
+                if t["status"] == "setup":
+                    t["blocks"] = blocks
+                elif t["status"] == "blocks":
+                    if len(blocks) != len(t["blocks"]):
+                        raise LeagueError("開始後はブロックの数を変えられません")
+                    games = [self.data["games"][gid] for gid in t["block_games"]]
+                    for i, (old, new) in enumerate(zip(t["blocks"], blocks)):
+                        if old != new and (games[i]["hands"] or games[i]["finished"]):
+                            raise LeagueError(f"{chr(65 + i)}ブロックはもう点数を記録しているので、メンバーを変えられません")
+                    for i, (old, new) in enumerate(zip(t["blocks"], blocks)):
+                        if old != new:
+                            g = games[i]
+                            n = len(new)
+                            g.update(players=list(new), start=START_POINTS[n],
+                                     points={pid: START_POINTS[n] for pid in new}, dealer=0)
+                    t["blocks"] = blocks
+                else:
+                    raise LeagueError("決勝が始まったので、ブロック分けは変えられません")
+                t["players"] = [pid for b in t["blocks"] for pid in b]
+            for i, gid in enumerate(t["block_games"]):  # 卓の名前も大会名に合わせる
+                self.data["games"][gid]["title"] = f"{t['name']} {chr(65 + i)}ブロック"
+            if t["final_game"]:
+                self.data["games"][t["final_game"]]["title"] = f"{t['name']} 決勝"
+            self._save()
+            return t
+
+    def change_entries(self, tid: str, key: str | None, player_ids: list[str], blocks: int) -> dict:
+        """開始前に参加者・ブロック数を変えて抽選し直す。"""
+        with self.lock:
+            t = self._tour(tid)
+            self._owner(t, key)
+            if t["status"] != "setup":
+                raise LeagueError("開始後は参加者を増やしたり減らしたりできません（ブロックの入れ替えはできます）")
+            if len(set(player_ids)) != len(player_ids):
+                raise LeagueError("同じプレイヤーが2回選ばれています")
+            for pid in player_ids:
+                self._player(pid)
+            n = len(player_ids)
+            if blocks not in [f["blocks"] for f in formats(n)]:
+                raise LeagueError(f"{n}人では{blocks}ブロックに分けられません（9〜16人）")
+            t["players"] = list(player_ids)
+            t["blocks"] = self._draw(player_ids, blocks)
+            self._save()
+            return t
+
     def start_tournament(self, tid: str, key: str | None) -> dict:
         with self.lock:
             t = self._tour(tid)

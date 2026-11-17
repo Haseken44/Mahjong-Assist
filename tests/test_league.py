@@ -189,3 +189,38 @@ def test_free_game_seats_are_drawn(store):
     ids = _players(store, 4)
     seen = {tuple(store.add_game(ids)["players"]) for _ in range(30)}
     assert all(sorted(s) == sorted(ids) for s in seen) and len(seen) > 1
+
+
+def test_owner_edits_tournament(store):
+    ids = _players(store, 13)
+    t, key = store.add_tournament("大会", ids[:12], 4)
+    # 開始前：名前・手動の入れ替え・参加者の変更
+    swapped = [list(b) for b in t["blocks"]]
+    swapped[0][0], swapped[1][0] = swapped[1][0], swapped[0][0]
+    store.edit_tournament(t["id"], key, name="第1回", blocks=swapped)
+    assert t["name"] == "第1回" and t["blocks"] == swapped
+    with pytest.raises(Forbidden):
+        store.edit_tournament(t["id"], "x", name="のっとり")
+    with pytest.raises(LeagueError):
+        store.edit_tournament(t["id"], key, blocks=[swapped[0] + swapped[1][:2], swapped[2], swapped[3]])  # 5人の卓
+    store.change_entries(t["id"], key, ids[:12], 3)
+    assert [len(b) for b in t["blocks"]] == [4, 4, 4]
+    store.start_tournament(t["id"], key)
+    # 開始後：記録のないブロックだけ差し替えできる（13人目と交代）
+    g0 = store.data["games"][t["block_games"][0]]
+    new = [list(b) for b in t["blocks"]]
+    out = new[1][2]
+    new[1][2] = ids[12]
+    store.edit_tournament(t["id"], key, blocks=new)
+    g1 = store.data["games"][t["block_games"][1]]
+    assert ids[12] in g1["players"] and out not in g1["players"] and g1["points"][ids[12]] == 25000
+    assert ids[12] in t["players"] and out not in t["players"]
+    store.add_hand(g0["id"], {"kind": "ron", "winner": g0["players"][0], "loser": g0["players"][1], "points": 1000})
+    locked = [list(b) for b in t["blocks"]]
+    locked[0][0], locked[2][0] = locked[2][0], locked[0][0]
+    with pytest.raises(LeagueError):
+        store.edit_tournament(t["id"], key, blocks=locked)
+    with pytest.raises(LeagueError):
+        store.change_entries(t["id"], key, ids[:12], 3)
+    store.edit_tournament(t["id"], key, name="第2回")
+    assert g0["title"].startswith("第2回")
